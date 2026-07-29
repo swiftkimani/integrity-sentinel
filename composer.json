@@ -1,0 +1,26 @@
+{
+    "name": "your-org/integrity-sentinel",
+    "description": "WordPress file-integrity and malware-pattern scanner: verifies core/plugin files against WordPress.org checksums and scans PHP files for webshell patterns.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=7.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6 || ^10.5 || ^11.0",
+        "wp-coding-standards/wpcs": "^3.1",
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0"
+    },
+    "scripts": {
+        "test": "phpunit -c phpunit.xml.dist",
+        "lint": "phpcs",
+        "lint:fix": "phpcbf",
+        "manifest": "php bin/make-manifest.php",
+        "manifest:check": "php bin/make-manifest.php --check"
+    },
+    "config": {
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        }
+    }
+}

@@ -1,10 +1,10 @@
 === Integrity Sentinel — Malware & File Scanner ===
-Contributors: yourwporgusername
+Contributors: Kefa Hamisi & Benard Kimani
 Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -19,8 +19,12 @@ this site that shouldn't be here?"**
 
 * **WordPress core files** against the official WordPress.org checksum
   API — the same data source WP-CLI's `wp core verify-checksums` uses.
+  Modified files, missing files, AND unexpected extra files inside
+  `wp-admin/` and `wp-includes/` (a classic backdoor drop location) are
+  all flagged.
 * **Installed WordPress.org plugin files** against their published
-  checksums (`wp plugin verify-checksums`'s data source). Premium or
+  checksums (`wp plugin verify-checksums`'s data source), including
+  unexpected extra files inside those plugins' directories. Premium or
   custom plugins with no published checksums are clearly listed as
   "not checkable" rather than silently skipped or falsely flagged.
 * **Every PHP file on the site** for common malware/webshell code
@@ -31,13 +35,69 @@ this site that shouldn't be here?"**
   only ever contain media, so executable PHP there is a strong signal
   on its own.
 
+* **Itself.** Every scan verifies Integrity Sentinel's own files
+  against its release manifest — a tampered scanner that reports "all
+  clean" is worse than no scanner.
+* **Site hardening.** Each scan audits configuration too: the built-in
+  file editor, debug output, weak auth salts, world-writable paths,
+  web-exposed `.git`/`.env`/`debug.log` files, backup archives sitting
+  in the webroot, rogue or newly-created administrator accounts, and
+  plugins that have been closed on WordPress.org.
+
+Themes, mu-plugins, and premium/custom plugins have no published
+WordPress.org checksums, so they can't be checksum-verified — their PHP
+files are still fully covered by the malware-pattern scan.
+
+**Tamper-resistant by design**
+
+Attackers switch off security plugins first, so Integrity Sentinel
+watches its own back:
+
+* **Deactivation alarm** — deactivating the plugin immediately emails
+  the alert address with who did it and from which IP.
+* **Dead-man's switch** — if no scan completes for N days (default 2),
+  you get an alert: a scanner that has silently stopped scanning
+  protects nothing.
+* **Alert-redirection guard** — changing the alert email notifies the
+  *previous* address, so alerts can't be quietly pointed elsewhere.
+* **Append-only audit log** — every scan, finding status change,
+  settings change, and hardening action is recorded with user and IP.
+* **Off-site webhook** — optionally POST every security event as JSON
+  to a webhook (Slack-compatible), putting a copy of the evidence
+  where an attacker on this server can't delete it.
+* **Update monitoring** — new plugin/theme installs trigger an
+  immediate alert, and WordPress.org plugin updates are checksum-
+  verified seconds after they land, catching tampered packages.
+
+**Active prevention (opt-in)**
+
+The Hardening screen can write a clearly-marked rule block into the
+uploads `.htaccess` that denies PHP execution there — a dropped
+webshell in uploads becomes inert instead of merely detected (nginx
+equivalent shown for manual setup). One click to apply, one to remove,
+and it never touches rules it didn't write.
+
 **How scanning works**
 
 Scans run in small batches (configurable, default 40 files per step)
 driven by a live AJAX progress bar, so a large site doesn't time out
 mid-scan. A background cron job runs a full scan daily, and a
 five-minute safety-net check resumes any scan that got interrupted
-(e.g. an admin closed the browser tab mid-scan).
+(e.g. an admin closed the browser tab mid-scan) — reloading the
+dashboard mid-scan picks the progress bar back up where it left off.
+Only one process ever drives a scan at a time, so the browser, cron,
+and WP-CLI can't trip over each other.
+
+**WP-CLI**
+
+Because WP-Cron is only as reliable as your site's traffic, the scan is
+also available as a WP-CLI command — ideal for a real system crontab:
+
+* `wp integrity-sentinel scan` — run a full scan (exits non-zero if new
+  findings were recorded, so cron wrappers can alert).
+* `wp integrity-sentinel status` — show the most recent run.
+* `wp integrity-sentinel findings [--status=…] [--severity=…] [--format=json]`
+  — list findings, scriptable output formats included.
 
 **What this is not**
 
@@ -83,7 +143,73 @@ finding. Review each finding's context before acting on it — that's
 exactly what the "View details" panel and Acknowledge/Ignore workflow
 are for.
 
+= Does it work on multisite? =
+
+Yes, with one deliberate simplification: the filesystem is shared
+across every subsite, so the scanner runs once, from the main site.
+Subsites don't get their own scan schedules or dashboards — they'd all
+be scanning the same files.
+
+= The daily scan doesn't seem to run reliably. =
+
+WP-Cron only fires when your site gets visits, so low-traffic sites can
+miss schedules. Either configure a real system cron to hit
+`wp-cron.php`, or run `wp integrity-sentinel scan` directly from your
+server's crontab.
+
 == Changelog ==
+
+= 1.2.0 =
+* New: self-defense tier — deactivation alarm, dead-man's switch
+  (configurable, default 2 days), alert-redirection guard, append-only
+  audit log with its own admin screen, and optional off-site webhook
+  delivery of all security events.
+* New: self-integrity check — every scan verifies the plugin's own
+  files against its release manifest and flags tampering, missing
+  files, or unknown files in its directory as critical findings.
+* New: hardening audit on every scan — file editor enabled, debug
+  display, weak/placeholder auth salts, default table prefix,
+  allow_url_include, EOL PHP, world-writable paths, web-exposed
+  .git/.env/debug.log, backup archives in the webroot, XML-RPC,
+  "admin" username, administrators created since the last scan, and
+  plugins closed on WordPress.org.
+* New: opt-in uploads hardening — one click writes (and cleanly
+  removes) an .htaccess block denying PHP execution in uploads, with
+  the nginx equivalent shown for manual setup.
+* New: update monitoring — alerts on new plugin/theme installs, and
+  verifies WordPress.org plugin updates against published checksums
+  immediately after they complete.
+
+= 1.1.0 =
+* New: unexpected extra files inside `wp-admin/`, `wp-includes/`, and
+  checksum-verified plugin directories are now flagged (classic malware
+  drop locations that checksum comparison alone can never see).
+* New: `wp integrity-sentinel scan | status | findings` WP-CLI commands.
+* New: reloading the dashboard mid-scan resumes the live progress bar.
+* New: multisite-aware — runs once from the main site instead of
+  duplicating scans per subsite.
+* Fixed: the scanner no longer flags its own heuristics file as a
+  webshell (rule literals are now self-match-proof, with a regression
+  test).
+* Fixed: core/plugin checksum verification now runs *before* stale
+  findings are auto-resolved and the alert email is sent, so persistent
+  checksum findings no longer duplicate every scan and alerts include
+  them.
+* Fixed: interrupted scans resumed by cron now include the checksum
+  verification passes.
+* Fixed: scans are single-driver — an advisory lock stops the browser
+  loop and the cron safety-net from processing the same batch twice
+  (stall detection is now based on last activity, not start time).
+* Fixed: alert emails count only findings from the completed scan, not
+  every unacknowledged finding on record.
+* Fixed: every occurrence of a heuristic match in a file is reported
+  (previously only the first), and two different rules matching one
+  file no longer overwrite each other's findings.
+* Improved: scan cursor no longer rewrites the full file list after
+  every batch; progress persists per file, and each batch respects a
+  time budget so high batch sizes can't hit PHP's execution limit.
+* Improved: plugins without published checksums (premium/custom) are
+  remembered for a week instead of being re-requested every scan.
 
 = 1.0.0 =
 * Initial release: core checksum verification, plugin checksum

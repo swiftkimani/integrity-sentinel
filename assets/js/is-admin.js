@@ -19,54 +19,147 @@
 			.then(function (r) { return r.json(); });
 	}
 
-	function initScanButton() {
+	// ---------------------------------------------------------------
+	// Scan progress (dashboard)
+	// ---------------------------------------------------------------
+
+	var scanUi = null;
+
+	function initScanUi() {
 		var btn = document.getElementById('is-scan-now-btn');
 		if (!btn) {
-			return;
+			return null;
 		}
-		var wrap = document.getElementById('is-scan-progress');
-		var fill = document.getElementById('is-progress-fill');
-		var text = document.getElementById('is-progress-text');
+		return {
+			btn: btn,
+			wrap: document.getElementById('is-scan-progress'),
+			fill: document.getElementById('is-progress-fill'),
+			text: document.getElementById('is-progress-text')
+		};
+	}
 
-		function runBatch(runId) {
-			post('is_scan_batch', { run_id: runId }).then(function (res) {
-				if (!res.success) {
-					text.textContent = window.ISAdmin.i18n.scanError + ' ' + (res.data && res.data.message ? res.data.message : '');
-					return;
-				}
-				var data = res.data;
-				var pct = data.files_total > 0 ? Math.round((data.files_scanned / data.files_total) * 100) : 0;
-				fill.style.width = pct + '%';
-				text.textContent = data.files_scanned + ' / ' + data.files_total + ' (' + pct + '%)';
+	function updateBar(scanned, total) {
+		var pct = total > 0 ? Math.round((scanned / total) * 100) : 0;
+		scanUi.fill.style.width = pct + '%';
+		scanUi.text.textContent = scanned + ' / ' + total + ' (' + pct + '%)';
+	}
 
-				if (data.done) {
-					text.textContent = window.ISAdmin.i18n.scanComplete + ' ' + text.textContent;
-					btn.disabled = false;
-					setTimeout(function () { window.location.reload(); }, 1200);
-				} else {
-					runBatch(runId);
-				}
-			}).catch(function () {
-				text.textContent = window.ISAdmin.i18n.scanError;
-			});
+	function finishScanUi(data) {
+		var extras = [];
+		if (data && data.core_check && data.core_check.error) {
+			extras.push(window.ISAdmin.i18n.scanError + ' ' + data.core_check.error);
 		}
+		if (data && data.plugin_check) {
+			if (data.plugin_check.error) {
+				extras.push(window.ISAdmin.i18n.scanError + ' ' + data.plugin_check.error);
+			} else if (data.plugin_check.skipped && data.plugin_check.skipped.length) {
+				extras.push(window.ISAdmin.i18n.notCheckable.replace('%d', data.plugin_check.skipped.length));
+			}
+		}
+		scanUi.text.textContent = window.ISAdmin.i18n.scanComplete + ' ' + scanUi.text.textContent +
+			(extras.length ? ' — ' + extras.join(' ') : '');
+		scanUi.btn.disabled = false;
+		setTimeout(function () { window.location.reload(); }, 1500);
+	}
 
-		btn.addEventListener('click', function () {
-			btn.disabled = true;
-			wrap.style.display = '';
-			text.textContent = window.ISAdmin.i18n.scanning;
-			fill.style.width = '0%';
-
-			post('is_start_scan').then(function (res) {
-				if (!res.success) {
-					text.textContent = window.ISAdmin.i18n.scanError;
-					btn.disabled = false;
-					return;
-				}
-				runBatch(res.data.run_id);
-			});
+	// Another process (cron/WP-CLI) is driving the run: watch progress
+	// via the read-only status endpoint instead of competing for batches.
+	function pollStatus() {
+		post('is_scan_status').then(function (res) {
+			if (!res.success) {
+				scanUi.text.textContent = window.ISAdmin.i18n.scanError;
+				return;
+			}
+			if (res.data.running) {
+				updateBar(res.data.files_scanned, res.data.files_total);
+				setTimeout(pollStatus, 3000);
+			} else {
+				finishScanUi(null);
+			}
+		}).catch(function () {
+			scanUi.text.textContent = window.ISAdmin.i18n.scanError;
 		});
 	}
+
+	function runBatch(runId) {
+		post('is_scan_batch', { run_id: runId }).then(function (res) {
+			if (!res.success) {
+				scanUi.text.textContent = window.ISAdmin.i18n.scanError + ' ' + (res.data && res.data.message ? res.data.message : '');
+				scanUi.btn.disabled = false;
+				return;
+			}
+			var data = res.data;
+			if (data.error) {
+				scanUi.text.textContent = window.ISAdmin.i18n.scanError + ' ' + data.error;
+				scanUi.btn.disabled = false;
+				return;
+			}
+			if (data.locked) {
+				pollStatus();
+				return;
+			}
+			updateBar(data.files_scanned, data.files_total);
+
+			if (data.done) {
+				finishScanUi(data);
+			} else {
+				runBatch(runId);
+			}
+		}).catch(function () {
+			scanUi.text.textContent = window.ISAdmin.i18n.scanError;
+		});
+	}
+
+	function startScanFlow() {
+		scanUi.btn.disabled = true;
+		scanUi.wrap.style.display = '';
+		scanUi.text.textContent = window.ISAdmin.i18n.scanning;
+		scanUi.fill.style.width = '0%';
+
+		post('is_start_scan').then(function (res) {
+			if (!res.success) {
+				scanUi.text.textContent = window.ISAdmin.i18n.scanError;
+				scanUi.btn.disabled = false;
+				return;
+			}
+			runBatch(res.data.run_id);
+		});
+	}
+
+	// If the page loads while a scan is already running (tab was closed
+	// and reopened, or a cron scan is underway), pick the run back up
+	// instead of showing a dead progress bar: drive batches if the lock
+	// is free, or watch via polling if something else is driving.
+	function resumeIfRunning() {
+		post('is_scan_status').then(function (res) {
+			if (!res.success || !res.data.running) {
+				scanUi.wrap.style.display = 'none';
+				scanUi.btn.disabled = false;
+				return;
+			}
+			scanUi.btn.disabled = true;
+			scanUi.wrap.style.display = '';
+			scanUi.text.textContent = window.ISAdmin.i18n.scanInProgress;
+			updateBar(res.data.files_scanned, res.data.files_total);
+			runBatch(res.data.run_id);
+		});
+	}
+
+	function initScanButton() {
+		scanUi = initScanUi();
+		if (!scanUi) {
+			return;
+		}
+		scanUi.btn.addEventListener('click', startScanFlow);
+
+		if (scanUi.wrap && scanUi.wrap.style.display !== 'none') {
+			resumeIfRunning();
+		}
+	}
+
+	// ---------------------------------------------------------------
+	// Findings table
+	// ---------------------------------------------------------------
 
 	function initFindingActions() {
 		document.querySelectorAll('.is-finding-action').forEach(function (link) {
@@ -111,7 +204,11 @@
 					var d = res.data;
 					var html = '<h2>' + escapeHtml(d.file_path) + '</h2>';
 					html += '<p><strong>' + escapeHtml(d.severity) + '</strong> — ' + escapeHtml(d.detail) + '</p>';
-					if (d.line) {
+					if (d.matches && d.matches.length) {
+						d.matches.forEach(function (m) {
+							html += '<p>Line ' + escapeHtml(m.line) + ':</p><pre>' + escapeHtml(m.snippet) + '</pre>';
+						});
+					} else if (d.line) {
 						html += '<p>Line ' + escapeHtml(d.line) + ':</p><pre>' + escapeHtml(d.snippet) + '</pre>';
 					}
 					if (d.expected_md5) {

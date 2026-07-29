@@ -53,22 +53,13 @@ class IS_Ajax {
 			wp_send_json_error( array( 'message' => __( 'Missing run id.', 'integrity-sentinel' ) ) );
 		}
 
+		// The scanner runs the core/plugin checksum comparisons itself as
+		// part of completing the final batch (before auto-resolve and the
+		// alert email), and includes their results in the progress array.
+		// A 'locked' response means another process (cron, CLI) is driving
+		// this run right now -- the JS switches to status polling.
 		$scanner  = new IS_Scanner();
 		$progress = $scanner->process_batch( $run_id );
-
-		if ( ! empty( $progress['done'] ) && empty( $progress['error'] ) ) {
-			// File pass is finished -- run the (fast, single-request) core
-			// and plugin checksum comparisons before reporting fully done.
-			$core_result   = $scanner->check_core_integrity( $run_id );
-			$plugin_result = $scanner->check_plugin_integrity( $run_id );
-
-			$progress['core_check'] = is_wp_error( $core_result )
-				? array( 'error' => $core_result->get_error_message() )
-				: array( 'findings' => $core_result );
-			$progress['plugin_check'] = is_wp_error( $plugin_result )
-				? array( 'error' => $plugin_result->get_error_message() )
-				: $plugin_result;
-		}
 
 		wp_send_json_success( $progress );
 	}
@@ -99,7 +90,22 @@ class IS_Ajax {
 			wp_send_json_error( array( 'message' => __( 'Invalid request.', 'integrity-sentinel' ) ) );
 		}
 
-		IS_DB::instance()->set_finding_status( $id, $status );
+		$db      = IS_DB::instance();
+		$finding = $db->get_finding( $id );
+		if ( ! $finding ) {
+			wp_send_json_error( array( 'message' => __( 'Finding not found.', 'integrity-sentinel' ) ) );
+		}
+
+		$db->set_finding_status( $id, $status );
+		IS_Audit_Log::record(
+			'finding_status_changed',
+			array(
+				'finding_id' => $id,
+				'file_path'  => $finding['file_path'],
+				'from'       => $finding['status'],
+				'to'         => $status,
+			)
+		);
 		wp_send_json_success();
 	}
 
@@ -128,6 +134,7 @@ class IS_Ajax {
 				'detail'     => $finding['detail'],
 				'line'       => $meta['line'] ?? null,
 				'snippet'    => $meta['snippet'] ?? null,
+				'matches'    => $meta['matches'] ?? null,
 				'expected_md5' => $meta['expected_md5'] ?? null,
 				'file_hash'  => $finding['file_hash'],
 				'first_seen' => $finding['first_seen'],

@@ -33,44 +33,67 @@ class IS_File_Walker {
 	 * same assumption every checksum/integrity scanner makes).
 	 */
 	public function list_files() {
-		$root  = realpath( ABSPATH );
+		$root = realpath( ABSPATH );
+		if ( false === $root ) {
+			return array();
+		}
+		return $this->collect( $root, $root );
+	}
+
+	/**
+	 * Same as list_files() but limited to one subtree (e.g. wp-includes,
+	 * or a single plugin directory). Paths are still returned relative to
+	 * ABSPATH so they slot straight into findings and exclusion checks.
+	 * Returns an empty array if the directory resolves outside ABSPATH.
+	 */
+	public function list_files_under( $abs_dir ) {
+		$root = realpath( ABSPATH );
+		$dir  = ( is_string( $abs_dir ) && '' !== $abs_dir ) ? realpath( $abs_dir ) : false;
+		if ( false === $root || false === $dir || 0 !== strpos( $dir, $root ) ) {
+			return array();
+		}
+		return $this->collect( $dir, $root );
+	}
+
+	private function collect( $start_dir, $root ) {
 		$paths = array();
 
-		if ( false === $root ) {
-			return $paths;
-		}
+		try {
+			$iterator = new RecursiveIteratorIterator(
+				new RecursiveDirectoryIterator( $start_dir, FilesystemIterator::SKIP_DOTS ),
+				RecursiveIteratorIterator::SELF_FIRST,
+				RecursiveIteratorIterator::CATCH_GET_CHILD // unreadable subdirectory: skip it, don't abort the whole walk
+			);
 
-		$iterator = new RecursiveIteratorIterator(
-			new RecursiveDirectoryIterator( $root, FilesystemIterator::SKIP_DOTS ),
-			RecursiveIteratorIterator::SELF_FIRST
-		);
+			foreach ( $iterator as $file ) {
+				/** @var SplFileInfo $file */
+				if ( ! $file->isFile() ) {
+					continue;
+				}
 
-		foreach ( $iterator as $file ) {
-			/** @var SplFileInfo $file */
-			if ( ! $file->isFile() ) {
-				continue;
+				$real = $file->getRealPath();
+				if ( false === $real || 0 !== strpos( $real, $root ) ) {
+					continue; // symlink escaping the webroot -- skip, don't follow.
+				}
+
+				$relative = ltrim( substr( $real, strlen( $root ) ), '/\\' );
+				$relative = str_replace( '\\', '/', $relative );
+
+				if ( $this->is_excluded( $relative ) ) {
+					continue;
+				}
+
+				$paths[] = $relative;
 			}
-
-			$real = $file->getRealPath();
-			if ( false === $real || 0 !== strpos( $real, $root ) ) {
-				continue; // symlink escaping the webroot -- skip, don't follow.
-			}
-
-			$relative = ltrim( substr( $real, strlen( $root ) ), '/\\' );
-			$relative = str_replace( '\\', '/', $relative );
-
-			if ( $this->is_excluded( $relative ) ) {
-				continue;
-			}
-
-			$paths[] = $relative;
+		} catch ( UnexpectedValueException $e ) {
+			// The start directory itself was unreadable; return what we have.
 		}
 
 		sort( $paths );
 		return $paths;
 	}
 
-	private function is_excluded( $relative_path ) {
+	public function is_excluded( $relative_path ) {
 		foreach ( $this->exclude_patterns as $pattern ) {
 			if ( '' === $pattern ) {
 				continue;
@@ -85,19 +108,29 @@ class IS_File_Walker {
 	}
 
 	/**
+	 * Resolves an absolute path to its ABSPATH-relative form, or null if
+	 * it doesn't resolve inside the webroot.
+	 */
+	public static function relative_to_abspath( $abs_path ) {
+		$root = realpath( ABSPATH );
+		$real = ( is_string( $abs_path ) && '' !== $abs_path ) ? realpath( $abs_path ) : false;
+		if ( false === $root || false === $real || 0 !== strpos( $real, $root ) ) {
+			return null;
+		}
+		return str_replace( '\\', '/', ltrim( substr( $real, strlen( $root ) ), '/\\' ) );
+	}
+
+	/**
 	 * True if a relative path is inside wp-content/uploads/ -- used by
 	 * the scanner to flag executable PHP living somewhere it should
 	 * never be (uploads is meant for media, not code).
 	 */
 	public static function is_in_uploads( $relative_path ) {
-		$uploads   = wp_upload_dir();
-		$abs_root  = realpath( ABSPATH );
-		$abs_upload = realpath( $uploads['basedir'] );
-		if ( false === $abs_root || false === $abs_upload ) {
+		$uploads          = wp_upload_dir();
+		$relative_uploads = self::relative_to_abspath( $uploads['basedir'] );
+		if ( null === $relative_uploads ) {
 			return false;
 		}
-		$relative_uploads = ltrim( substr( $abs_upload, strlen( $abs_root ) ), '/\\' );
-		$relative_uploads = str_replace( '\\', '/', $relative_uploads );
 		return 0 === strpos( $relative_path, $relative_uploads . '/' );
 	}
 }

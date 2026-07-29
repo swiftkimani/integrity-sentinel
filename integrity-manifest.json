@@ -1,0 +1,20 @@
+{
+    "assets/css/is-admin.css": "3673e802a04c77ee4a7986c5b67a3522502de23250005940c4c44311bff85d29",
+    "assets/js/is-admin.js": "fb675c89a6d414d8162c681575b191623e711dc6d9029a945a9ad5a106fe64be",
+    "includes/class-is-admin.php": "7f55c41f6e7ae455770ea4444f916ebe4f33dd9fdd7c78e2492f893c2f390799",
+    "includes/class-is-ajax.php": "6eb4d0157ec226187d02fea4098c3afd9a189ec834acf529c72169069e4bf496",
+    "includes/class-is-audit-log.php": "26a043fab8f92c25e905f7404b5d1d7f8edd7251205ffa8fc6cca5de84eb14bf",
+    "includes/class-is-cli.php": "f5a4d4e77fb940f245ab2e644b9cce0ca30a003aa96f2a416c0cfe8f6c7096d2",
+    "includes/class-is-core-checksums.php": "3a0c66b6586e0a227a856f596f7bbef06f336f96225ba5096fd232794af7844a",
+    "includes/class-is-cron.php": "5707de8d520fafbc43f4c66744c01c3d2883acf431d1cbf4b85a061065d02a8e",
+    "includes/class-is-db.php": "b42876b271b992193e7810ce737f6a84079367a98a31cf08f48bb2bf40b2e4f2",
+    "includes/class-is-file-walker.php": "6fa91e2f1510290a819cc57892e152588d9bb306faf568ac476bb43bac39698f",
+    "includes/class-is-hardening.php": "e4682b0996dbe32c36f2be2e1fa1393d5d48062389d9ecdb6549b8cf733a8391",
+    "includes/class-is-heuristics.php": "c2ae0f864565359a58fa75c116dcd7410730b21ff73863e24942e3c13c86d126",
+    "includes/class-is-notifications.php": "4fe06aeedfd77272df788773fe255916a8685689cc80d782248298388fe2e972",
+    "includes/class-is-plugin-checksums.php": "b2e17087084782ad087c7c5f6d79a31ccf1ac32e8a079d2713bdd22a455e8026",
+    "includes/class-is-scanner.php": "bc741f5dec56b7194a07d6ce4c35bb7b487a5c061b23cb471af3962da228c8c7",
+    "includes/class-is-update-monitor.php": "3af2c1a01eff230f4f35e7069a3a50a106a20a84c7bdba1982d2364074fc52ff",
+    "integrity-sentinel.php": "6b19d7b8bceb4a65d2f5cb107c3c4bcde7a64c64c8bc224736b6c49122669ce0",
+    "uninstall.php": "31fd5d17ba898b944761a5c33c8a7c60336f412c87860d08d40bbe0a2950e6b3"
+}

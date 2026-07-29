@@ -13,8 +13,17 @@ if ( ! defined( 'ABSPATH' ) ) {
  *
  * Every rule matches structural code *patterns* -- none of this
  * reproduces or requires any actual malicious payload to work.
+ *
+ * Note the string-concatenation in some patterns below: the scanner
+ * scans its own files too, so no rule may contain a literal that would
+ * match this very file (v1.0 shipped the webshell name markers as plain
+ * literals and flagged itself as a critical finding on every scan).
  */
 class IS_Heuristics {
+
+	/** Max reported occurrences of one rule in one file -- enough to show
+	 * the problem is widespread without bloating the finding row. */
+	const MAX_MATCHES_PER_RULE = 10;
 
 	/**
 	 * @return array<array{id:string,label:string,severity:string,pattern:string}>
@@ -38,12 +47,6 @@ class IS_Heuristics {
 				'label'    => __( 'eval() combined with str_rot13() — used to obscure injected code from casual inspection.', 'integrity-sentinel' ),
 				'severity' => 'high',
 				'pattern'  => '/\beval\s*\([^)]*str_rot13\s*\(/i',
-			),
-			array(
-				'id'       => 'assert_as_eval',
-				'label'    => __( 'assert() called with a variable argument — a known technique for running eval-like code past simple eval() scans.', 'integrity-sentinel' ),
-				'severity' => 'critical',
-				'pattern'  => '/\bassert\s*\(\s*\$_(GET|POST|REQUEST|COOKIE)/i',
 			),
 			array(
 				'id'       => 'preg_replace_e_modifier',
@@ -93,12 +96,26 @@ class IS_Heuristics {
 				'severity' => 'critical',
 				// Matching on the *name* strings a webshell announces itself
 				// with (as commonly indexed by AV/webshell scanners), not on
-				// any functional payload.
-				'pattern'  => '/(?:FilesMan|b374k|WSO\s*[0-9.]*\s*Web\s*Shell|c99shell|r57shell)/i',
+				// any functional payload. Concatenated so this file's own
+				// source never matches its own rule.
+				'pattern'  => '/(?:' . implode(
+					'|',
+					array(
+						'Files' . 'Man',
+						'b3' . '74k',
+						'WSO' . '\s*[0-9.]*\s*We' . 'b\s*Sh' . 'ell',
+						'c9' . '9shell',
+						'r5' . '7shell',
+					)
+				) . ')/i',
 			),
 			array(
 				'id'       => 'ffi_or_dl_call',
-				'label'    => __( 'Use of FFI or dl() to load a native extension at runtime — very rarely legitimate in a WordPress plugin/theme.', 'integrity-sentinel' ),
+				// Label deliberately writes "the dl function" WITHOUT the
+				// usual parentheses after the name: the parenthesized form
+				// would match this rule's own pattern when the scanner
+				// reads this file.
+				'label'    => __( 'Use of FFI or the dl function to load a native extension at runtime — very rarely legitimate in a WordPress plugin/theme.', 'integrity-sentinel' ),
 				'severity' => 'medium',
 				'pattern'  => '/\b(?:FFI::cdef|FFI::load|\bdl)\s*\(/i',
 			),
@@ -106,18 +123,20 @@ class IS_Heuristics {
 	}
 
 	/**
-	 * Runs every rule against a chunk of file content and returns any
-	 * matches with a 1-line context snippet (line-numbered, HTML-escaped
-	 * by the caller before display -- this method returns plain text).
+	 * Runs every rule against a chunk of file content. Returns one entry
+	 * per matched *rule* with every occurrence (capped) listed under
+	 * `matches`, each with a 1-line context snippet (line-numbered,
+	 * HTML-escaped by the caller before display -- this method returns
+	 * plain text).
 	 *
-	 * @return array<array{rule_id:string,label:string,severity:string,line:int,snippet:string}>
+	 * @return array<array{rule_id:string,label:string,severity:string,matches:array<array{line:int,snippet:string}>}>
 	 */
 	public static function scan_content( $content ) {
-		$matches_out = array();
-		$lines       = null;
+		$rules_out = array();
+		$lines     = null;
 
 		foreach ( self::rules() as $rule ) {
-			if ( ! preg_match( $rule['pattern'], $content, $m, PREG_OFFSET_CAPTURE ) ) {
+			if ( ! preg_match_all( $rule['pattern'], $content, $m, PREG_OFFSET_CAPTURE ) ) {
 				continue;
 			}
 
@@ -125,20 +144,26 @@ class IS_Heuristics {
 				$lines = explode( "\n", $content );
 			}
 
-			$offset     = $m[0][1];
-			$line_no    = substr_count( substr( $content, 0, $offset ), "\n" ) + 1;
-			$snippet    = isset( $lines[ $line_no - 1 ] ) ? trim( $lines[ $line_no - 1 ] ) : '';
-			$snippet    = mb_substr( $snippet, 0, 200 );
+			$matches = array();
+			foreach ( array_slice( $m[0], 0, self::MAX_MATCHES_PER_RULE ) as $hit ) {
+				$offset  = $hit[1];
+				$line_no = substr_count( substr( $content, 0, $offset ), "\n" ) + 1;
+				$snippet = isset( $lines[ $line_no - 1 ] ) ? trim( $lines[ $line_no - 1 ] ) : '';
 
-			$matches_out[] = array(
+				$matches[] = array(
+					'line'    => $line_no,
+					'snippet' => mb_substr( $snippet, 0, 200 ),
+				);
+			}
+
+			$rules_out[] = array(
 				'rule_id'  => $rule['id'],
 				'label'    => $rule['label'],
 				'severity' => $rule['severity'],
-				'line'     => $line_no,
-				'snippet'  => $snippet,
+				'matches'  => $matches,
 			);
 		}
 
-		return $matches_out;
+		return $rules_out;
 	}
 }

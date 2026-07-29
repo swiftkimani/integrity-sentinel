@@ -19,6 +19,8 @@ class IS_Admin {
 		add_action( 'admin_menu', array( $this, 'add_menu' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue' ) );
+		add_action( 'admin_post_is_apply_uploads_block', array( $this, 'handle_apply_uploads_block' ) );
+		add_action( 'admin_post_is_remove_uploads_block', array( $this, 'handle_remove_uploads_block' ) );
 	}
 
 	public function add_menu() {
@@ -33,6 +35,8 @@ class IS_Admin {
 		);
 		add_submenu_page( 'integrity-sentinel', __( 'Dashboard', 'integrity-sentinel' ), __( 'Dashboard', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel', array( $this, 'render_dashboard' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Findings', 'integrity-sentinel' ), __( 'Findings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-findings', array( $this, 'render_findings' ) );
+		add_submenu_page( 'integrity-sentinel', __( 'Hardening', 'integrity-sentinel' ), __( 'Hardening', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-hardening', array( $this, 'render_hardening' ) );
+		add_submenu_page( 'integrity-sentinel', __( 'Audit Log', 'integrity-sentinel' ), __( 'Audit Log', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-audit', array( $this, 'render_audit_log' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Settings', 'integrity-sentinel' ), __( 'Settings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-settings', array( $this, 'render_settings' ) );
 	}
 
@@ -49,10 +53,11 @@ class IS_Admin {
 				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 				'nonce'   => wp_create_nonce( IS_Ajax::NONCE_ACTION ),
 				'i18n'    => array(
-					'scanning'      => __( 'Scanning…', 'integrity-sentinel' ),
-					'scanComplete'  => __( 'Scan complete.', 'integrity-sentinel' ),
-					'scanError'     => __( 'Scan error:', 'integrity-sentinel' ),
-					'confirmAction' => __( 'Are you sure?', 'integrity-sentinel' ),
+					'scanning'       => __( 'Scanning…', 'integrity-sentinel' ),
+					'scanComplete'   => __( 'Scan complete.', 'integrity-sentinel' ),
+					'scanError'      => __( 'Scan error:', 'integrity-sentinel' ),
+					'scanInProgress' => __( 'A scan is already in progress — showing its status.', 'integrity-sentinel' ),
+					'notCheckable'   => __( '%d plugin(s) could not be checksum-verified (not hosted on WordPress.org).', 'integrity-sentinel' ),
 				),
 			)
 		);
@@ -70,6 +75,8 @@ class IS_Admin {
 	}
 
 	public function sanitize_settings( $input ) {
+		$old = get_option( 'is_scan_settings', array() );
+
 		$out = array();
 		$out['batch_size']           = max( 5, min( 200, (int) ( $input['batch_size'] ?? 40 ) ) );
 		$out['alert_email']          = is_email( $input['alert_email'] ?? '' ) ? sanitize_email( $input['alert_email'] ) : get_option( 'admin_email' );
@@ -77,7 +84,79 @@ class IS_Admin {
 		$out['scan_uploads_for_php'] = empty( $input['scan_uploads_for_php'] ) ? 0 : 1;
 		$out['max_file_size_kb']     = max( 64, (int) ( $input['max_file_size_kb'] ?? 2048 ) );
 		$out['excluded_paths']       = sanitize_textarea_field( $input['excluded_paths'] ?? '' );
+		$out['webhook_url']          = esc_url_raw( $input['webhook_url'] ?? '', array( 'http', 'https' ) );
+		$out['deadman_days']         = max( 1, min( 30, (int) ( $input['deadman_days'] ?? 2 ) ) );
+
+		// Alert-redirection guard: whoever WAS receiving alerts gets told
+		// they no longer will. Without this, an attacker with an admin
+		// session silently points alerts at themselves and every other
+		// defense goes quiet.
+		$old_email = $old['alert_email'] ?? '';
+		if ( $old_email && is_email( $old_email ) && $old_email !== $out['alert_email'] ) {
+			$user = wp_get_current_user();
+			wp_mail(
+				$old_email,
+				'[' . wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES ) . '] ' . __( 'Integrity Sentinel alert address was changed', 'integrity-sentinel' ),
+				sprintf(
+					/* translators: 1: new email address, 2: user login, 3: IP address */
+					__( "Integrity Sentinel security alerts will no longer be sent to this address.\n\nNew alert address: %1\$s\nChanged by: %2\$s (IP %3\$s)\n\nIf you did not expect this change, investigate immediately.\n", 'integrity-sentinel' ),
+					$out['alert_email'],
+					$user && $user->ID ? $user->user_login : __( '(unknown)', 'integrity-sentinel' ),
+					IS_Audit_Log::request_ip()
+				)
+			);
+			IS_Audit_Log::record(
+				'alert_email_changed',
+				array(
+					'from' => $old_email,
+					'to'   => $out['alert_email'],
+				)
+			);
+		}
+
+		$changed = array();
+		foreach ( $out as $key => $value ) {
+			if ( ! array_key_exists( $key, $old ) || (string) $old[ $key ] !== (string) $value ) {
+				$changed[] = $key;
+			}
+		}
+		if ( $changed && $old ) {
+			IS_Audit_Log::record( 'settings_changed', array( 'keys' => $changed ) );
+		}
+
 		return $out;
+	}
+
+	// -----------------------------------------------------------------
+	// Hardening actions (plain admin-post forms, no JS dependency)
+	// -----------------------------------------------------------------
+
+	public function handle_apply_uploads_block() {
+		$this->guard_hardening_action();
+		$result = IS_Hardening::apply_uploads_block();
+		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
+	}
+
+	public function handle_remove_uploads_block() {
+		$this->guard_hardening_action();
+		$result = IS_Hardening::remove_uploads_block();
+		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
+	}
+
+	private function guard_hardening_action() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
+		}
+		check_admin_referer( 'is_hardening_action' );
+	}
+
+	private function redirect_hardening( $error_message = '' ) {
+		$url = add_query_arg( array( 'page' => 'integrity-sentinel-hardening' ), admin_url( 'admin.php' ) );
+		if ( $error_message ) {
+			$url = add_query_arg( 'is_error', rawurlencode( $error_message ), $url );
+		}
+		wp_safe_redirect( $url );
+		exit;
 	}
 
 	// -----------------------------------------------------------------
@@ -145,11 +224,14 @@ class IS_Admin {
 
 			<h2><?php esc_html_e( 'What this scans', 'integrity-sentinel' ); ?></h2>
 			<ul class="is-explainer">
-				<li><?php esc_html_e( 'WordPress core files against the official WordPress.org checksum API.', 'integrity-sentinel' ); ?></li>
-				<li><?php esc_html_e( 'Installed WordPress.org plugin files against their published checksums.', 'integrity-sentinel' ); ?></li>
+				<li><?php esc_html_e( 'WordPress core files against the official WordPress.org checksum API — including unexpected extra files inside wp-admin/ and wp-includes/.', 'integrity-sentinel' ); ?></li>
+				<li><?php esc_html_e( 'Installed WordPress.org plugin files against their published checksums — including unexpected extra files inside those plugins\' directories.', 'integrity-sentinel' ); ?></li>
 				<li><?php esc_html_e( 'Every PHP file, for common malware/webshell code patterns.', 'integrity-sentinel' ); ?></li>
 				<li><?php esc_html_e( 'PHP files hiding inside the uploads directory (which should only ever contain media).', 'integrity-sentinel' ); ?></li>
 			</ul>
+			<p class="description">
+				<?php esc_html_e( 'Themes, mu-plugins, and premium/custom plugins have no published WordPress.org checksums, so they can\'t be checksum-verified — their PHP files are still covered by the malware-pattern scan.', 'integrity-sentinel' ); ?>
+			</p>
 			<p class="description">
 				<?php esc_html_e( "This is a file-integrity and pattern scanner, not a full security suite: it doesn't include a firewall, login-attack protection, or a global threat-intelligence feed. It's built to answer one question well: \"is there anything on this site that shouldn't be here?\"", 'integrity-sentinel' ); ?>
 			</p>
@@ -267,6 +349,121 @@ class IS_Admin {
 	}
 
 	// -----------------------------------------------------------------
+	// Hardening
+	// -----------------------------------------------------------------
+
+	public function render_hardening() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$active = IS_Hardening::uploads_block_active();
+		$error  = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		?>
+		<div class="wrap is-wrap">
+			<h1><?php esc_html_e( 'Hardening', 'integrity-sentinel' ); ?></h1>
+
+			<?php if ( $error ) : ?>
+				<div class="notice notice-error"><p><?php echo esc_html( $error ); ?></p></div>
+			<?php endif; ?>
+
+			<h2><?php esc_html_e( 'Block PHP execution in uploads', 'integrity-sentinel' ); ?></h2>
+			<p>
+				<?php esc_html_e( 'The uploads directory should only ever contain media. Blocking PHP execution there makes a dropped webshell inert even before a scan finds it — detection tells you a backdoor landed; this stops it from running at all.', 'integrity-sentinel' ); ?>
+			</p>
+			<p>
+				<strong><?php esc_html_e( 'Status:', 'integrity-sentinel' ); ?></strong>
+				<?php if ( $active ) : ?>
+					<span class="is-badge is-badge-low"><?php esc_html_e( 'Protected (Apache rules in place)', 'integrity-sentinel' ); ?></span>
+				<?php else : ?>
+					<span class="is-badge is-badge-high"><?php esc_html_e( 'Not blocked', 'integrity-sentinel' ); ?></span>
+				<?php endif; ?>
+			</p>
+
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<?php wp_nonce_field( 'is_hardening_action' ); ?>
+				<?php if ( $active ) : ?>
+					<input type="hidden" name="action" value="is_remove_uploads_block">
+					<?php submit_button( __( 'Remove the block', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+				<?php else : ?>
+					<input type="hidden" name="action" value="is_apply_uploads_block">
+					<?php submit_button( __( 'Apply the block', 'integrity-sentinel' ), 'primary', 'submit', false ); ?>
+				<?php endif; ?>
+			</form>
+
+			<p class="description">
+				<?php esc_html_e( 'This writes a clearly-marked rule block into the uploads .htaccess (existing rules are preserved, and removal deletes only our block). It protects Apache and LiteSpeed servers. On nginx, .htaccess has no effect — add this to your server config instead:', 'integrity-sentinel' ); ?>
+			</p>
+			<pre><?php echo esc_html( IS_Hardening::nginx_snippet() ); ?></pre>
+
+			<h2><?php esc_html_e( 'Hardening checks', 'integrity-sentinel' ); ?></h2>
+			<p>
+				<?php esc_html_e( 'Every scan also audits site configuration: the file editor, debug output, auth salts, world-writable paths, exposed .git/.env/debug.log files, backup archives in the webroot, administrator accounts, plugins closed on WordPress.org, and more. Results appear under Findings alongside file-integrity issues.', 'integrity-sentinel' ); ?>
+			</p>
+		</div>
+		<?php
+	}
+
+	// -----------------------------------------------------------------
+	// Audit log
+	// -----------------------------------------------------------------
+
+	public function render_audit_log() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$per_page = 50;
+		$paged    = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only pagination
+		$entries  = IS_Audit_Log::entries( $per_page, ( $paged - 1 ) * $per_page );
+		$total    = IS_Audit_Log::count();
+		$pages    = max( 1, (int) ceil( $total / $per_page ) );
+		?>
+		<div class="wrap is-wrap">
+			<h1><?php esc_html_e( 'Audit Log', 'integrity-sentinel' ); ?></h1>
+			<p class="description">
+				<?php esc_html_e( 'Append-only record of every security-relevant action: scans, finding status changes, settings changes, hardening actions, deactivations. Nothing done through WordPress can act on this plugin without leaving a row here.', 'integrity-sentinel' ); ?>
+			</p>
+
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'When', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'User', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'IP', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Action', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Detail', 'integrity-sentinel' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php if ( empty( $entries ) ) : ?>
+						<tr><td colspan="5"><?php esc_html_e( 'No entries yet.', 'integrity-sentinel' ); ?></td></tr>
+					<?php endif; ?>
+					<?php foreach ( $entries as $entry ) : ?>
+						<tr>
+							<td><?php echo esc_html( $entry['created_at'] ); ?></td>
+							<td><?php echo esc_html( $entry['user_login'] ); ?></td>
+							<td><?php echo esc_html( $entry['ip'] ); ?></td>
+							<td><code><?php echo esc_html( $entry['action'] ); ?></code></td>
+							<td><code><?php echo esc_html( (string) $entry['detail'] ); ?></code></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+
+			<?php if ( $pages > 1 ) : ?>
+				<div class="tablenav"><div class="tablenav-pages">
+					<?php
+					for ( $p = 1; $p <= $pages; $p++ ) {
+						$url = add_query_arg( array( 'page' => 'integrity-sentinel-audit', 'paged' => $p ), admin_url( 'admin.php' ) );
+						printf( '<a class="%s" href="%s">%d</a> ', $p === $paged ? 'current' : '', esc_url( $url ), (int) $p ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+					}
+					?>
+				</div></div>
+			<?php endif; ?>
+		</div>
+		<?php
+	}
+
+	// -----------------------------------------------------------------
 	// Settings
 	// -----------------------------------------------------------------
 
@@ -283,6 +480,8 @@ class IS_Admin {
 				'scan_uploads_for_php' => 1,
 				'max_file_size_kb'     => 2048,
 				'excluded_paths'       => '',
+				'webhook_url'          => '',
+				'deadman_days'         => 2,
 			)
 		);
 		?>
@@ -326,6 +525,20 @@ class IS_Admin {
 						<td>
 							<input type="number" min="64" id="is_max_file_size_kb" name="is_scan_settings[max_file_size_kb]" value="<?php echo esc_attr( $settings['max_file_size_kb'] ); ?>" class="small-text">
 							<p class="description"><?php esc_html_e( 'Files are always hashed for checksum comparison; files larger than this are skipped for the (slower) malware-pattern scan.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_webhook_url"><?php esc_html_e( 'Alert webhook URL', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<input type="url" id="is_webhook_url" name="is_scan_settings[webhook_url]" value="<?php echo esc_attr( $settings['webhook_url'] ); ?>" class="regular-text" placeholder="https://">
+							<p class="description"><?php esc_html_e( 'Optional. Security events are also POSTed as JSON to this URL — an off-site copy of alerts that an attacker on this server cannot delete. Works with Slack incoming webhooks and most alerting services.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_deadman_days"><?php esc_html_e( 'Alert if no scan completes for (days)', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<input type="number" min="1" max="30" id="is_deadman_days" name="is_scan_settings[deadman_days]" value="<?php echo esc_attr( $settings['deadman_days'] ); ?>" class="small-text">
+							<p class="description"><?php esc_html_e( 'Dead-man\'s switch: if no scan has completed in this many days, an alert is sent — a scanner that has silently stopped scanning protects nothing.', 'integrity-sentinel' ); ?></p>
 						</td>
 					</tr>
 					<tr>

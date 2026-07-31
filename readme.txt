@@ -4,7 +4,7 @@ Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.16.0
+Stable tag: 1.17.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -189,6 +189,22 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.17.0 =
+* New: "liquid glass" visual refresh for the app shell — frosted
+  glass panels (backdrop-filter blur) on the sidebar, cards, status
+  tiles, tables, buttons, and modal, layered over a soft multi-colour
+  gradient backdrop (indigo/violet/fuchsia/cyan). Gradient-text page
+  headings, glowing gradient active-nav state and primary buttons.
+* Fix: the sidebar's `position: sticky` was silently broken by
+  `.is-shell`'s `overflow: hidden` (added earlier purely for rounded
+  corners) — an overflow-hidden ancestor becomes the sticky element's
+  containing block, which isn't the viewport, so it never actually
+  stuck while scrolling. Fixed by dropping `overflow: hidden` from the
+  shell and giving the sidebar/content panes their own split
+  `border-radius` instead; the sidebar now genuinely stays put while
+  the content column scrolls, with its own internal scroll if the nav
+  list is ever taller than the viewport.
 
 = 1.16.0 =
 * New: single-page "app shell" UI — every Integrity Sentinel screen now

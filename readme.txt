@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.7.0
+Stable tag: 1.8.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,17 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.8.0 =
+* Fix: "Ignore" on a finding is now durable — an ignored finding no
+  longer silently reappears as a brand-new "new" finding on the very
+  next scan when the underlying file is unchanged. If the file's
+  content actually changes afterward, it's correctly flagged again.
+* Change: two of the noisiest heuristic rules (error-suppressed
+  variable includes, long base64-looking string literals) are now
+  'low' severity instead of 'medium' — both are common in legitimate
+  WordPress code on their own; the genuinely dangerous combinations
+  already have their own dedicated, higher-severity rules.
 
 = 1.7.0 =
 * New: upload-time blocking of executable file types (.php and

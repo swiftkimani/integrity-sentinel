@@ -74,14 +74,25 @@ class IS_Heuristics {
 			),
 			array(
 				'id'       => 'suspicious_error_suppressed_include',
-				'label'    => __( 'Error-suppressed include/require of a variable path — sometimes used to quietly load a dropped payload file.', 'integrity-sentinel' ),
-				'severity' => 'medium',
+				// 'low' rather than 'medium': this pattern alone is a weak
+				// signal on its own -- error-suppressed includes of a
+				// variable template path are routine in real WordPress
+				// themes/plugins (template-part loading, page builders).
+				// It's worth surfacing for review, not worth an alert.
+				'label'    => __( 'Error-suppressed include/require of a variable path. Common in legitimate template-loading code too, so treat this as a hint worth a quick look rather than a confirmed problem on its own.', 'integrity-sentinel' ),
+				'severity' => 'low',
 				'pattern'  => '/@(?:include|include_once|require|require_once)\s*\(\s*\$/i',
 			),
 			array(
 				'id'       => 'long_base64_blob',
-				'label'    => __( 'A very long base64-looking string literal assigned in code — often the payload body of an injected backdoor.', 'integrity-sentinel' ),
-				'severity' => 'medium',
+				// 'low' rather than 'medium': a long base64-looking string
+				// by itself is common in legitimate code too (embedded
+				// fonts/images as data URIs, license keys, serialized
+				// data). The genuinely dangerous combination -- base64
+				// content actually passed to eval() -- already has its
+				// own dedicated 'eval_base64' rule at 'critical'.
+				'label'    => __( 'A very long base64-looking string literal. Often legitimate (embedded font/image data, license keys), but occasionally the payload body of an injected backdoor -- worth a quick look, not a confirmed problem on its own.', 'integrity-sentinel' ),
+				'severity' => 'low',
 				'pattern'  => '/[\'"][A-Za-z0-9+\/]{500,}={0,2}[\'"]/',
 			),
 			array(

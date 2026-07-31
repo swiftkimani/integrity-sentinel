@@ -46,7 +46,15 @@ class IS_IP_List {
 	}
 
 	private function hooks() {
-		add_action( 'plugins_loaded', array( $this, 'enforce' ), 1 );
+		// 'init', not 'plugins_loaded': this class is instantiated from
+		// is_init(), which is itself a 'plugins_loaded' callback --
+		// 'plugins_loaded' fires exactly once per request, so a callback
+		// registered for it from inside another 'plugins_loaded' callback
+		// is registered too late to ever run. 'init' fires immediately
+		// after 'plugins_loaded' completes and hasn't happened yet at
+		// this point, so it's the earliest hook that's actually safe to
+		// register from here -- still well before any output is sent.
+		add_action( 'init', array( $this, 'enforce' ), 1 );
 	}
 
 	public function enforce() {

@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.3.0
+Stable tag: 1.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,16 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.4.0 =
+* New: HTTP hardening bundle on the Hardening screen — security headers
+  (X-Content-Type-Options, Referrer-Policy, Permissions-Policy),
+  clickjacking protection (X-Frame-Options + frame-ancestors CSP), and
+  WordPress-version hiding (generator tag + asset ?ver= stripping) are
+  all on by default. Disabling XML-RPC and disabling RSS/Atom feeds are
+  available as opt-in toggles (off by default — both can break a real
+  integration) since they can break Jetpack/mobile-app/feed-subscriber
+  use cases some sites rely on.
 
 = 1.3.0 =
 * New: fault-isolation layer (IS_Guard) — every hardening/detection

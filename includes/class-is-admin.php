@@ -38,6 +38,7 @@ class IS_Admin {
 		add_submenu_page( 'integrity-sentinel', __( 'Findings', 'integrity-sentinel' ), __( 'Findings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-findings', array( $this, 'render_findings' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Hardening', 'integrity-sentinel' ), __( 'Hardening', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-hardening', array( $this, 'render_hardening' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Access Control', 'integrity-sentinel' ), __( 'Access Control', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-access', array( $this, 'render_access_control' ) );
+		add_submenu_page( 'integrity-sentinel', __( 'Login Security', 'integrity-sentinel' ), __( 'Login Security', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-login', array( $this, 'render_login_security' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Audit Log', 'integrity-sentinel' ), __( 'Audit Log', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-audit', array( $this, 'render_audit_log' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Settings', 'integrity-sentinel' ), __( 'Settings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-settings', array( $this, 'render_settings' ) );
 	}
@@ -90,6 +91,76 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_ip_list_settings' ),
 			)
 		);
+		register_setting(
+			'is_login_rename_settings_group',
+			'is_login_rename_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_login_rename_settings' ),
+			)
+		);
+		register_setting(
+			'is_login_throttle_settings_group',
+			'is_login_throttle_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_login_throttle_settings' ),
+			)
+		);
+	}
+
+	public function sanitize_login_rename_settings( $input ) {
+		$old  = IS_Login::rename_settings();
+		$raw  = isset( $input['login_slug'] ) ? $input['login_slug'] : '';
+		$slug = IS_Login::sanitize_login_slug( $raw );
+
+		if ( '' !== trim( (string) $raw ) && '' === $slug ) {
+			add_settings_error(
+				'is_login_rename_settings',
+				'is_login_slug_invalid',
+				__( 'That login slug could not be used (empty after removing invalid characters, or it collides with a WordPress core path). The login rename was left disabled.', 'integrity-sentinel' )
+			);
+		} elseif ( '' !== $slug && function_exists( 'get_page_by_path' ) && get_page_by_path( $slug ) ) {
+			add_settings_error(
+				'is_login_rename_settings',
+				'is_login_slug_collision',
+				sprintf(
+					/* translators: %s: the rejected slug */
+					__( 'A page or post already uses the slug "%s". Choose a different login slug — the previous setting was kept.', 'integrity-sentinel' ),
+					$slug
+				)
+			);
+			$slug = $old['login_slug'];
+		}
+
+		$out = array( 'login_slug' => $slug );
+		if ( (string) $old['login_slug'] !== (string) $out['login_slug'] ) {
+			IS_Audit_Log::record( 'login_slug_changed', array( 'from' => $old['login_slug'], 'to' => $out['login_slug'] ) );
+		}
+
+		return $out;
+	}
+
+	public function sanitize_login_throttle_settings( $input ) {
+		$old = IS_Login::throttle_settings();
+		$out = array(
+			'enabled'         => empty( $input['enabled'] ) ? 0 : 1,
+			'max_attempts'    => max( 3, min( 20, (int) ( $input['max_attempts'] ?? 5 ) ) ),
+			'window_minutes'  => max( 1, min( 1440, (int) ( $input['window_minutes'] ?? 15 ) ) ),
+			'lockout_minutes' => max( 1, min( 1440, (int) ( $input['lockout_minutes'] ?? 15 ) ) ),
+		);
+
+		$changed = array();
+		foreach ( $out as $key => $value ) {
+			if ( (string) ( $old[ $key ] ?? '' ) !== (string) $value ) {
+				$changed[] = $key;
+			}
+		}
+		if ( $changed ) {
+			IS_Audit_Log::record( 'login_throttle_settings_changed', array( 'keys' => $changed ) );
+		}
+
+		return $out;
 	}
 
 	public function sanitize_ip_list_settings( $input ) {
@@ -696,6 +767,75 @@ class IS_Admin {
 					</tr>
 				</table>
 				<?php submit_button( __( 'Save access control settings', 'integrity-sentinel' ) ); ?>
+			</form>
+		</div>
+		<?php
+	}
+
+	// -----------------------------------------------------------------
+	// Login security (rename + rate limiting)
+	// -----------------------------------------------------------------
+
+	public function render_login_security() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		settings_errors( 'is_login_rename_settings' );
+		$rename   = IS_Login::rename_settings();
+		$throttle = IS_Login::throttle_settings();
+		?>
+		<div class="wrap is-wrap">
+			<h1><?php esc_html_e( 'Login Security', 'integrity-sentinel' ); ?></h1>
+
+			<h2><?php esc_html_e( 'Hide the login page', 'integrity-sentinel' ); ?></h2>
+			<div class="notice notice-warning inline">
+				<p>
+					<?php esc_html_e( 'This is the riskiest setting in this plugin: getting it wrong can make wp-login.php unreachable. Safety net: define IS_SAFE_MODE as true in wp-config.php at any time to instantly restore normal wp-login.php access, no database access required.', 'integrity-sentinel' ); ?>
+				</p>
+			</div>
+			<form method="post" action="options.php">
+				<?php settings_fields( 'is_login_rename_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="is_login_slug"><?php esc_html_e( 'Custom login slug', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<code><?php echo esc_html( home_url( '/' ) ); ?></code>
+							<input type="text" id="is_login_slug" name="is_login_rename_settings[login_slug]" value="<?php echo esc_attr( $rename['login_slug'] ); ?>" class="regular-text" placeholder="<?php esc_attr_e( 'leave blank to keep wp-login.php', 'integrity-sentinel' ); ?>">
+							<p class="description"><?php esc_html_e( 'When set, wp-login.php 404s for everyone and this becomes the real login URL. Leave blank to keep the default wp-login.php behavior unchanged.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save login slug', 'integrity-sentinel' ) ); ?>
+			</form>
+
+			<h2><?php esc_html_e( 'Login rate limiting', 'integrity-sentinel' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'Locks an IP out of authentication after repeated failed logins. Whitelisted IPs (Access Control) always bypass this.', 'integrity-sentinel' ); ?></p>
+			<form method="post" action="options.php">
+				<?php settings_fields( 'is_login_throttle_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_login_throttle_settings[enabled]" value="1" <?php checked( $throttle['enabled'], 1 ); ?>>
+								<?php esc_html_e( 'Lock out an IP after too many failed login attempts.', 'integrity-sentinel' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_max_attempts"><?php esc_html_e( 'Failed attempts allowed', 'integrity-sentinel' ); ?></label></th>
+						<td><input type="number" min="3" max="20" id="is_max_attempts" name="is_login_throttle_settings[max_attempts]" value="<?php echo esc_attr( $throttle['max_attempts'] ); ?>" class="small-text"></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_window_minutes"><?php esc_html_e( 'Within (minutes)', 'integrity-sentinel' ); ?></label></th>
+						<td><input type="number" min="1" max="1440" id="is_window_minutes" name="is_login_throttle_settings[window_minutes]" value="<?php echo esc_attr( $throttle['window_minutes'] ); ?>" class="small-text"></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_lockout_minutes"><?php esc_html_e( 'Lockout duration (minutes)', 'integrity-sentinel' ); ?></label></th>
+						<td><input type="number" min="1" max="1440" id="is_lockout_minutes" name="is_login_throttle_settings[lockout_minutes]" value="<?php echo esc_attr( $throttle['lockout_minutes'] ); ?>" class="small-text"></td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save rate limiting settings', 'integrity-sentinel' ) ); ?>
 			</form>
 		</div>
 		<?php

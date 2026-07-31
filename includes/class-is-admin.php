@@ -23,6 +23,8 @@ class IS_Admin {
 		add_action( 'admin_post_is_remove_uploads_block', array( $this, 'handle_remove_uploads_block' ) );
 		add_action( 'admin_post_is_apply_exec_block', array( $this, 'handle_apply_exec_block' ) );
 		add_action( 'admin_post_is_remove_exec_block', array( $this, 'handle_remove_exec_block' ) );
+		add_action( 'admin_post_is_apply_hotlink_block', array( $this, 'handle_apply_hotlink_block' ) );
+		add_action( 'admin_post_is_remove_hotlink_block', array( $this, 'handle_remove_hotlink_block' ) );
 		add_action( 'admin_post_is_reset_module_health', array( $this, 'handle_reset_module_health' ) );
 	}
 
@@ -109,6 +111,56 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_login_throttle_settings' ),
 			)
 		);
+		register_setting(
+			'is_hotlink_settings_group',
+			'is_hotlink_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_hotlink_settings' ),
+			)
+		);
+		register_setting(
+			'is_bot_block_settings_group',
+			'is_bot_block_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_bot_block_settings' ),
+			)
+		);
+	}
+
+	public function sanitize_hotlink_settings( $input ) {
+		$old = IS_Hotlink::settings();
+		$out = array( 'allowed_domains' => sanitize_textarea_field( $input['allowed_domains'] ?? '' ) );
+
+		if ( (string) $old['allowed_domains'] !== (string) $out['allowed_domains'] ) {
+			IS_Audit_Log::record( 'hotlink_settings_changed', array() );
+			// Keep an already-active block's rule content in sync with the
+			// newly-saved domain list, rather than leaving it stale.
+			add_action( 'shutdown', array( 'IS_Hotlink', 'reapply_if_active' ) );
+		}
+
+		return $out;
+	}
+
+	public function sanitize_bot_block_settings( $input ) {
+		$old = IS_Bot_Block::settings();
+		$out = array(
+			'enabled'      => empty( $input['enabled'] ) ? 0 : 1,
+			'blocked_bots' => sanitize_textarea_field( $input['blocked_bots'] ?? '' ),
+		);
+
+		$changed = array();
+		foreach ( $out as $key => $value ) {
+			if ( (string) ( $old[ $key ] ?? '' ) !== (string) $value ) {
+				$changed[] = $key;
+			}
+		}
+		if ( $changed ) {
+			IS_Audit_Log::record( 'bot_block_settings_changed', array( 'keys' => $changed ) );
+		}
+
+		return $out;
 	}
 
 	public function sanitize_login_rename_settings( $input ) {
@@ -316,6 +368,18 @@ class IS_Admin {
 		$key     = isset( $_POST['target'] ) ? sanitize_key( wp_unslash( $_POST['target'] ) ) : '';
 		$targets = IS_Hardening::exec_block_targets();
 		return isset( $targets[ $key ] ) ? $targets[ $key ] : null;
+	}
+
+	public function handle_apply_hotlink_block() {
+		$this->guard_hardening_action();
+		$result = IS_Hotlink::apply();
+		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
+	}
+
+	public function handle_remove_hotlink_block() {
+		$this->guard_hardening_action();
+		$result = IS_Hotlink::remove();
+		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
 	public function handle_reset_module_health() {
@@ -679,6 +743,8 @@ class IS_Admin {
 
 			<?php $this->render_other_exec_block_targets(); ?>
 
+			<?php $this->render_hotlink_section(); ?>
+
 			<?php $this->render_http_hardening_section(); ?>
 
 			<h2><?php esc_html_e( 'Hardening checks', 'integrity-sentinel' ); ?></h2>
@@ -740,6 +806,65 @@ class IS_Admin {
 				<?php endforeach; ?>
 			</tbody>
 		</table>
+		<?php
+	}
+
+	/**
+	 * Hotlink protection for the uploads directory. Same .htaccess
+	 * marker-block mechanism as the exec blocks above (static image
+	 * requests never go through PHP, so there's no other way to enforce
+	 * this) but with its own independent BEGIN/END markers.
+	 */
+	private function render_hotlink_section() {
+		$active    = IS_Hotlink::active();
+		$settings  = IS_Hotlink::settings();
+		$home_host = (string) wp_parse_url( home_url(), PHP_URL_HOST );
+		?>
+		<h2><?php esc_html_e( 'Hotlink protection', 'integrity-sentinel' ); ?></h2>
+		<p class="description"><?php esc_html_e( 'Stops other sites from embedding your images directly (bandwidth theft). Direct access, feed readers, and social-share previews (which send no referer) always still work.', 'integrity-sentinel' ); ?></p>
+
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_hotlink_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="is_hotlink_allowed_domains"><?php esc_html_e( 'Allowed domains', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<textarea id="is_hotlink_allowed_domains" name="is_hotlink_settings[allowed_domains]" rows="4" class="large-text code"><?php echo esc_textarea( $settings['allowed_domains'] ); ?></textarea>
+						<p class="description">
+							<?php
+							printf(
+								/* translators: %s: the site's own domain */
+								esc_html__( 'One domain per line, in addition to your own (%s), which is always allowed automatically.', 'integrity-sentinel' ),
+								esc_html( $home_host )
+							);
+							?>
+						</p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save allowed domains', 'integrity-sentinel' ) ); ?>
+		</form>
+
+		<p>
+			<strong><?php esc_html_e( 'Status:', 'integrity-sentinel' ); ?></strong>
+			<?php if ( $active ) : ?>
+				<span class="is-badge is-badge-low"><?php esc_html_e( 'Protected (Apache rules in place)', 'integrity-sentinel' ); ?></span>
+			<?php else : ?>
+				<span class="is-badge is-badge-high"><?php esc_html_e( 'Not blocked', 'integrity-sentinel' ); ?></span>
+			<?php endif; ?>
+		</p>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<?php wp_nonce_field( 'is_hardening_action' ); ?>
+			<?php if ( $active ) : ?>
+				<input type="hidden" name="action" value="is_remove_hotlink_block">
+				<?php submit_button( __( 'Remove the block', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+			<?php else : ?>
+				<input type="hidden" name="action" value="is_apply_hotlink_block">
+				<?php submit_button( __( 'Apply the block', 'integrity-sentinel' ), 'primary', 'submit', false ); ?>
+			<?php endif; ?>
+		</form>
+		<p class="description"><?php esc_html_e( 'On nginx, .htaccess has no effect — add this to your server config instead:', 'integrity-sentinel' ); ?></p>
+		<pre><?php echo esc_html( IS_Hotlink::nginx_snippet( $home_host, IS_Hotlink::parse_domain_list( $settings['allowed_domains'] ) ) ); ?></pre>
 		<?php
 	}
 
@@ -818,8 +943,9 @@ class IS_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$settings = IS_IP_List::settings();
-		$your_ip  = IS_IP_List::client_ip();
+		$settings  = IS_IP_List::settings();
+		$your_ip   = IS_IP_List::client_ip();
+		$bot_block = IS_Bot_Block::settings();
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Access Control', 'integrity-sentinel' ); ?></h1>
@@ -877,6 +1003,31 @@ class IS_Admin {
 					</tr>
 				</table>
 				<?php submit_button( __( 'Save access control settings', 'integrity-sentinel' ) ); ?>
+			</form>
+
+			<h2><?php esc_html_e( 'AI crawlers & scraper bots', 'integrity-sentinel' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'Blocks a curated, editable list of AI-training crawlers and scrapers with a 403, and lists the same names as Disallow entries in robots.txt for the well-behaved ones that honor it. Blocking known bot user agents carries no risk to human visitors.', 'integrity-sentinel' ); ?></p>
+			<form method="post" action="options.php">
+				<?php settings_fields( 'is_bot_block_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_bot_block_settings[enabled]" value="1" <?php checked( $bot_block['enabled'], 1 ); ?>>
+								<?php esc_html_e( 'Block the user agents listed below.', 'integrity-sentinel' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_blocked_bots"><?php esc_html_e( 'Blocked user agents', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<textarea id="is_blocked_bots" name="is_bot_block_settings[blocked_bots]" rows="10" class="large-text code"><?php echo esc_textarea( $bot_block['blocked_bots'] ); ?></textarea>
+							<p class="description"><?php esc_html_e( 'One user-agent substring per line, matched case-insensitively (e.g. "GPTBot" matches any user agent containing that text).', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save bot blocking settings', 'integrity-sentinel' ) ); ?>
 			</form>
 		</div>
 		<?php

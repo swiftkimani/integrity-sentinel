@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.2.0
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,20 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.3.0 =
+* New: fault-isolation layer (IS_Guard) — every hardening/detection
+  module now runs inside a per-module circuit breaker instead of
+  directly off a WordPress hook. A module that keeps throwing pauses
+  itself for a cooldown period (with an audit-log entry and an alert
+  if configured) instead of risking a site fatal; every other module
+  keeps running unaffected.
+* New: IS_SAFE_MODE kill switch — define `IS_SAFE_MODE` truthy in
+  wp-config.php to pause every guarded hardening module at once. The
+  last-resort escape hatch for a site owner locked out by a hardening
+  feature, no database or admin access required.
+* New: Feature health panel on the Dashboard, showing each module's
+  status and a one-click reset for a paused module.
 
 = 1.2.0 =
 * New: self-defense tier — deactivation alarm, dead-man's switch

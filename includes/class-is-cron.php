@@ -5,7 +5,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 /**
  * Two cron responsibilities:
- *  1. Kick off a fresh full scan on a schedule (daily by default).
+ *  1. Kick off a fresh full scan on a schedule -- configurable
+ *     (hourly/twicedaily/daily/weekly), daily by default. Despite its
+ *     name, IS_CRON_DAILY_SCAN is just the hook identifier; the actual
+ *     recurrence is whatever scan_frequency is currently set to.
  *  2. A safety net that resumes a scan whose driver went away -- e.g.
  *     the admin started a manual scan via AJAX and closed the browser
  *     tab mid-scan. Without this, that run would sit at "running"
@@ -20,7 +23,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 class IS_Cron {
 
 	private static $instance = null;
-	const STALL_THRESHOLD = 15 * MINUTE_IN_SECONDS;
+	const STALL_THRESHOLD    = 15 * MINUTE_IN_SECONDS;
+
+	/** WP core provides hourly/twicedaily/daily; weekly is the only gap. */
+	const VALID_FREQUENCIES = array( 'hourly', 'twicedaily', 'daily', 'weekly' );
 
 	public static function instance() {
 		if ( null === self::$instance ) {
@@ -34,21 +40,46 @@ class IS_Cron {
 		add_action( IS_CRON_DAILY_SCAN, array( $this, 'run_daily_scan' ) );
 		add_action( IS_CRON_RESUME_SCAN, array( $this, 'resume_stalled_scan' ) );
 
-		// Register the resume-check to run every 5 minutes via a
-		// custom cron schedule, self-healing rather than assuming a
-		// fixed WordPress interval exists.
-		add_filter( 'cron_schedules', array( $this, 'add_five_minute_schedule' ) ); // phpcs:ignore WordPress.WP.CronInterval.CronSchedulesInterval
+		// Register our own schedules (the 5-minute resume check, and
+		// 'weekly' for the configurable scan frequency) rather than
+		// assuming they exist -- self-healing across WP core versions.
+		add_filter( 'cron_schedules', array( $this, 'add_custom_schedules' ) ); // phpcs:ignore WordPress.WP.CronInterval.CronSchedulesInterval
 		if ( ! wp_next_scheduled( IS_CRON_RESUME_SCAN ) ) {
 			wp_schedule_event( time() + MINUTE_IN_SECONDS, 'is_five_minutes', IS_CRON_RESUME_SCAN );
 		}
 	}
 
-	public function add_five_minute_schedule( $schedules ) {
+	public function add_custom_schedules( $schedules ) {
 		$schedules['is_five_minutes'] = array(
 			'interval' => 5 * MINUTE_IN_SECONDS,
 			'display'  => __( 'Every 5 minutes (Integrity Sentinel)', 'integrity-sentinel' ),
 		);
+		if ( ! isset( $schedules['weekly'] ) ) {
+			$schedules['weekly'] = array(
+				'interval' => WEEK_IN_SECONDS,
+				'display'  => __( 'Once weekly', 'integrity-sentinel' ),
+			);
+		}
 		return $schedules;
+	}
+
+	/** Pure: falls back to 'daily' for anything not one of our known schedules. */
+	public static function normalize_frequency( $frequency ) {
+		return in_array( $frequency, self::VALID_FREQUENCIES, true ) ? $frequency : 'daily';
+	}
+
+	/**
+	 * Reschedules the recurring scan at a new frequency, replacing
+	 * whatever was previously scheduled. Safe to call even if nothing
+	 * was scheduled yet (e.g. from activation).
+	 */
+	public static function reschedule_scan( $frequency ) {
+		$frequency = self::normalize_frequency( $frequency );
+		$existing  = wp_next_scheduled( IS_CRON_DAILY_SCAN );
+		if ( $existing ) {
+			wp_unschedule_event( $existing, IS_CRON_DAILY_SCAN );
+		}
+		wp_schedule_event( time() + ( 2 * HOUR_IN_SECONDS ), $frequency, IS_CRON_DAILY_SCAN );
 	}
 
 	public function run_daily_scan() {

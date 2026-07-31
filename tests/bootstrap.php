@@ -50,3 +50,4 @@ require_once dirname( __DIR__ ) . '/includes/class-is-plugin-checksums.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-file-walker.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-hardening.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-guard.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-headers.php';

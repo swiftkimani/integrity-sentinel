@@ -3,7 +3,7 @@
  * Plugin Name:       Integrity Sentinel — Malware & File Scanner
  * Plugin URI:        https://example.com/integrity-sentinel
  * Description:       Finds what's already on your site: verifies WordPress core and plugin files against official WordPress.org checksums, flags unexpected files dropped into core and plugin directories, scans every PHP file for known malware/webshell patterns, and flags PHP files hiding in uploads. Batched, resumable scans with a live progress bar, a findings dashboard, email alerts, and a WP-CLI command.
- * Version:           1.5.0
+ * Version:           1.6.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Your Org
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'IS_VERSION', '1.5.0' );
+define( 'IS_VERSION', '1.6.0' );
 define( 'IS_PLUGIN_FILE', __FILE__ );
 define( 'IS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'IS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -57,6 +57,7 @@ function is_init() {
 	IS_Update_Monitor::instance();
 	IS_Headers::instance();
 	IS_IP_List::instance();
+	IS_Login::instance();
 
 	if ( is_admin() ) {
 		IS_Admin::instance();

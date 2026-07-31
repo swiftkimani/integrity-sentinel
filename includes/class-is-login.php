@@ -41,7 +41,13 @@ class IS_Login {
 	}
 
 	private function hooks() {
-		add_action( 'plugins_loaded', array( $this, 'maybe_intercept_login_url' ), 1 );
+		// 'init', not 'plugins_loaded': this class is instantiated from
+		// is_init(), itself a 'plugins_loaded' callback -- a callback
+		// registered for 'plugins_loaded' from inside another
+		// 'plugins_loaded' callback is registered too late to ever run,
+		// since that hook fires exactly once per request. 'init' fires
+		// immediately after and hasn't happened yet at this point.
+		add_action( 'init', array( $this, 'maybe_intercept_login_url' ), 1 );
 		add_filter( 'site_url', array( $this, 'filter_site_url' ), 10, 2 );
 		add_filter( 'network_site_url', array( $this, 'filter_site_url' ), 10, 2 );
 

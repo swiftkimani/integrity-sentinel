@@ -4,7 +4,7 @@ Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.15.0
+Stable tag: 1.15.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -189,6 +189,21 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.15.1 =
+* Fix: IP blacklisting, login URL rename, and AI-bot blocking were
+  registering their enforcement on the 'plugins_loaded' hook from
+  inside another 'plugins_loaded' callback (is_init()) — a hook that
+  fires exactly once per request, so a callback registered for it from
+  within another callback of the same hook is registered too late to
+  ever run. All three features silently never enforced anything.
+  Caught via a live end-to-end test against a real WordPress install
+  (unit tests only cover pure logic and couldn't catch this — it's a
+  WordPress hook-timing integration issue). Fixed by moving all three
+  to the 'init' hook, which fires immediately after 'plugins_loaded'
+  and is unaffected by the same problem. Verified live: IP
+  blacklisting, AI-bot blocking, and login URL rename now all
+  correctly block/redirect as designed.
 
 = 1.15.0 =
 * New: "Security status" overview on the Dashboard — one glance at

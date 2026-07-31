@@ -1,14 +1,14 @@
-=== Integrity Sentinel — Malware & File Scanner ===
+=== Integrity Sentinel — Malware Scanner & Hardening Suite ===
 Contributors: Kefa Hamisi & Benard Kimani
-Tags: security, malware, scanner, file integrity, checksums
+Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.14.0
+Stable tag: 1.15.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Finds what's already on your site: verifies core & plugin files against official WordPress.org checksums and scans every PHP file for malware/webshell patterns.
+File-integrity scanning against official WordPress.org checksums, plus a full hardening suite: access control, login/2FA, HTTP/REST hardening, bot blocking, and human-in-the-loop quarantine.
 
 == Description ==
 
@@ -76,6 +76,37 @@ uploads `.htaccess` that denies PHP execution there — a dropped
 webshell in uploads becomes inert instead of merely detected (nginx
 equivalent shown for manual setup). One click to apply, one to remove,
 and it never touches rules it didn't write.
+
+**The full hardening suite**
+
+Everything below runs through a fault-isolation layer (a module that
+keeps erroring pauses itself instead of risking the site), and every
+feature that could conceivably break a real integration if misconfigured
+(XML-RPC, feeds, login rename, full REST lockdown) ships off by default
+— the Dashboard's Security Status panel shows the state of all of it
+at a glance, each linking to where it's configured:
+
+* **Access control** — editable, CIDR-aware IP allow/deny lists;
+  hotlink protection; a curated, editable AI-crawler/scraper blocklist.
+* **Login security** — hide wp-login.php behind a custom slug; per-IP
+  login rate limiting; TOTP two-factor authentication with recovery
+  codes and optional per-role enforcement.
+* **HTTP/REST hardening** — security headers, clickjacking protection,
+  WordPress-version hiding, REST user-enumeration blocking, and an
+  optional full REST lockdown for unauthenticated requests.
+* **Integration endpoint** — a dedicated `integrity-sentinel/v1/posts`
+  REST endpoint for creating blog posts from an external tool,
+  authenticated with WordPress's own Application Passwords.
+* **Shell-execution prevention** — blocks executable file types at
+  upload time, extends the PHP-execution block to other writable
+  directories, and audits which dangerous PHP functions are still
+  enabled.
+* **Quarantine** — suspends a flagged file into a locked-down
+  directory instead of deleting it; a human explicitly restores or
+  permanently deletes it later. Nothing is ever removed automatically.
+* **IS_SAFE_MODE** — a `wp-config.php` kill switch that instantly
+  pauses every hardening module, for recovering from a misconfiguration
+  without database access.
 
 **How scanning works**
 
@@ -158,6 +189,26 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.15.0 =
+* New: "Security status" overview on the Dashboard — one glance at
+  every hardening feature this plugin ships (headers, XML-RPC/feeds,
+  hotlink protection, IP access control, AI bot blocking, login
+  rename/rate limiting, two-factor enforcement, REST restriction, the
+  blog-post endpoint, and quarantine), each linking straight to where
+  it's configured. Settings stay on their existing WP-admin-convention
+  submenu pages rather than being physically merged into one giant
+  page — same organizing pattern every other security plugin uses —
+  but now there's one place to see the state of all of them together.
+* New: responsive design pass across every admin screen — data tables
+  scroll horizontally instead of squeezing unreadably narrow on phones
+  and tablets (same 782px breakpoint WP admin's own menu collapses
+  at), the dashboard's card grids reflow from four columns down to one
+  as the screen narrows, and checkboxes get a small dependency-free
+  visual upgrade (accent-color) instead of the bare browser default.
+* Updated the plugin's own description to reflect what it actually
+  does now — it grew well past "scanner" over the last several
+  releases.
 
 = 1.14.0 =
 * New: Quarantine screen — a human-in-the-loop quarantine engine, the

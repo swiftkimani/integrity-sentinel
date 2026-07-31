@@ -1,7 +1,8 @@
 {
     "assets/css/is-admin.css": "3673e802a04c77ee4a7986c5b67a3522502de23250005940c4c44311bff85d29",
     "assets/js/is-admin.js": "fb675c89a6d414d8162c681575b191623e711dc6d9029a945a9ad5a106fe64be",
-    "includes/class-is-admin.php": "19c6601179324384d8decc5ca88c05cde11d45cc34b15b50c79ada3d28168b25",
+    "includes/class-is-2fa.php": "1a8cd2a4440c2c2bf8a541f5f7a3a3122b57e4fb8a6715f054f7e8fbe8d000e8",
+    "includes/class-is-admin.php": "d00237ade70f7f95732e212ba0ce891c6ff26f7cb1d7f9444ea94cdb2b4cbc60",
     "includes/class-is-ajax.php": "6eb4d0157ec226187d02fea4098c3afd9a189ec834acf529c72169069e4bf496",
     "includes/class-is-audit-log.php": "26a043fab8f92c25e905f7404b5d1d7f8edd7251205ffa8fc6cca5de84eb14bf",
     "includes/class-is-bot-block.php": "d0902bb94a5a21dd6cdeca9d74fab5078e44104936985225e6610632afc3d3d0",
@@ -22,8 +23,9 @@
     "includes/class-is-rest-api.php": "036d932538648493a0d106366c9493902a09e87c1e9ede2258d535599de91ef4",
     "includes/class-is-rest-posts.php": "d7a7ccaeaff0cb17e51285008a741aa44e1cc6ca7991ed9f5af01c0ef060ebe4",
     "includes/class-is-scanner.php": "bc741f5dec56b7194a07d6ce4c35bb7b487a5c061b23cb471af3962da228c8c7",
+    "includes/class-is-totp.php": "ffb38a4812f033ab7de73d75f4bbdfb309ca05e77e6d465ec7a11c2fc5868d87",
     "includes/class-is-update-monitor.php": "3af2c1a01eff230f4f35e7069a3a50a106a20a84c7bdba1982d2364074fc52ff",
     "includes/class-is-upload-guard.php": "c0c98e530442494c5fef1f22a98041995e79dec41b672815bc71074f61cd69c9",
-    "integrity-sentinel.php": "033adeff7e72d74ee1ef389597b52d0acfefe04726fbb5c3aa9da9a3ee1bd3b0",
+    "integrity-sentinel.php": "34678a76bfadd0d35a77f4e111c7237ee3b54c6018fa54b8fd085ce2139b896f",
     "uninstall.php": "31fd5d17ba898b944761a5c33c8a7c60336f412c87860d08d40bbe0a2950e6b3"
 }

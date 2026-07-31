@@ -31,6 +31,103 @@ class IS_Hardening {
 		return trailingslashit( $uploads['basedir'] ) . '.htaccess';
 	}
 
+	/**
+	 * Writable, commonly-abused directories other than uploads that
+	 * benefit from the same PHP-execution block -- included only when
+	 * they actually exist on this install, so the list stays honest
+	 * rather than offering to "protect" a directory the site doesn't have.
+	 *
+	 * @return array<string,array{label:string,abs_path:string}>
+	 */
+	public static function exec_block_targets() {
+		$uploads = wp_upload_dir();
+		$targets = array(
+			'uploads' => array(
+				'label'    => __( 'Uploads', 'integrity-sentinel' ),
+				'abs_path' => $uploads['basedir'],
+			),
+			'cache'   => array(
+				'label'    => __( 'wp-content/cache', 'integrity-sentinel' ),
+				'abs_path' => WP_CONTENT_DIR . '/cache',
+			),
+			'upgrade' => array(
+				'label'    => __( 'wp-content/upgrade', 'integrity-sentinel' ),
+				'abs_path' => WP_CONTENT_DIR . '/upgrade',
+			),
+			'temp'    => array(
+				'label'    => __( 'wp-content/temp', 'integrity-sentinel' ),
+				'abs_path' => WP_CONTENT_DIR . '/temp',
+			),
+		);
+
+		return array_filter(
+			$targets,
+			function ( $target ) {
+				return is_dir( $target['abs_path'] );
+			}
+		);
+	}
+
+	public static function htaccess_path_for( $abs_dir ) {
+		return trailingslashit( $abs_dir ) . '.htaccess';
+	}
+
+	public static function block_active_for( $abs_dir ) {
+		$path = self::htaccess_path_for( $abs_dir );
+		if ( ! file_exists( $path ) || ! is_readable( $path ) ) {
+			return false;
+		}
+		return false !== strpos( (string) file_get_contents( $path ), self::BLOCK_BEGIN ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+	}
+
+	/**
+	 * Appends our marker-delimited block to $abs_dir/.htaccess,
+	 * preserving any existing rules.
+	 *
+	 * @return true|WP_Error
+	 */
+	public static function apply_block_for( $abs_dir ) {
+		if ( self::block_active_for( $abs_dir ) ) {
+			return true;
+		}
+		$path     = self::htaccess_path_for( $abs_dir );
+		$existing = file_exists( $path ) ? (string) file_get_contents( $path ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$content  = rtrim( $existing );
+		$content  = ( '' === $content ? '' : $content . "\n\n" ) . self::block_rules();
+
+		if ( false === @file_put_contents( $path, $content ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- single well-known file, error surfaced below
+			return new WP_Error( 'is_htaccess_unwritable', __( 'Could not write the .htaccess file — check directory permissions.', 'integrity-sentinel' ) );
+		}
+		IS_Audit_Log::record( 'exec_block_applied', array( 'path' => $path ) );
+		return true;
+	}
+
+	/**
+	 * Removes ONLY our marker-delimited block from $abs_dir/.htaccess,
+	 * leaving anything else in the file untouched.
+	 *
+	 * @return true|WP_Error
+	 */
+	public static function remove_block_for( $abs_dir ) {
+		if ( ! self::block_active_for( $abs_dir ) ) {
+			return true;
+		}
+		$path    = self::htaccess_path_for( $abs_dir );
+		$content = (string) file_get_contents( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$pattern = '/\n?' . preg_quote( self::BLOCK_BEGIN, '/' ) . '.*?' . preg_quote( self::BLOCK_END, '/' ) . '\n?/s';
+		$content = trim( (string) preg_replace( $pattern, '', $content ) );
+
+		$written = ( '' === $content )
+			? @unlink( $path ) // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.unlink_unlink -- removing a now-empty file we created
+			: ( false !== @file_put_contents( $path, $content . "\n" ) ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+
+		if ( ! $written ) {
+			return new WP_Error( 'is_htaccess_unwritable', __( 'Could not update the .htaccess file — check directory permissions.', 'integrity-sentinel' ) );
+		}
+		IS_Audit_Log::record( 'exec_block_removed', array( 'path' => $path ) );
+		return true;
+	}
+
 	/** The Apache rules we write: 2.4 syntax with a 2.2 fallback. */
 	public static function block_rules() {
 		return self::BLOCK_BEGIN . "\n"
@@ -53,57 +150,22 @@ class IS_Hardening {
 		return "location ~* ^/wp-content/uploads/.*\\.(?:php|phtml|php[0-9])$ {\n\tdeny all;\n}";
 	}
 
+	/** Thin wrapper over block_active_for() kept for the existing uploads-specific call sites/tests. */
 	public static function uploads_block_active() {
-		$path = self::uploads_htaccess_path();
-		if ( ! file_exists( $path ) || ! is_readable( $path ) ) {
-			return false;
-		}
-		return false !== strpos( (string) file_get_contents( $path ), self::BLOCK_BEGIN ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$uploads = wp_upload_dir();
+		return self::block_active_for( $uploads['basedir'] );
 	}
 
-	/**
-	 * Appends our marker-delimited block, preserving any existing rules.
-	 * @return true|WP_Error
-	 */
+	/** @return true|WP_Error */
 	public static function apply_uploads_block() {
-		if ( self::uploads_block_active() ) {
-			return true;
-		}
-		$path     = self::uploads_htaccess_path();
-		$existing = file_exists( $path ) ? (string) file_get_contents( $path ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
-		$content  = rtrim( $existing );
-		$content  = ( '' === $content ? '' : $content . "\n\n" ) . self::block_rules();
-
-		if ( false === @file_put_contents( $path, $content ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- single well-known file, error surfaced below
-			return new WP_Error( 'is_htaccess_unwritable', __( 'Could not write the uploads .htaccess file — check directory permissions.', 'integrity-sentinel' ) );
-		}
-		IS_Audit_Log::record( 'uploads_block_applied', array( 'path' => $path ) );
-		return true;
+		$uploads = wp_upload_dir();
+		return self::apply_block_for( $uploads['basedir'] );
 	}
 
-	/**
-	 * Removes ONLY our marker-delimited block, leaving anything else in
-	 * the file untouched.
-	 * @return true|WP_Error
-	 */
+	/** @return true|WP_Error */
 	public static function remove_uploads_block() {
-		if ( ! self::uploads_block_active() ) {
-			return true;
-		}
-		$path    = self::uploads_htaccess_path();
-		$content = (string) file_get_contents( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
-		$pattern = '/\n?' . preg_quote( self::BLOCK_BEGIN, '/' ) . '.*?' . preg_quote( self::BLOCK_END, '/' ) . '\n?/s';
-		$content = trim( (string) preg_replace( $pattern, '', $content ) );
-
-		$written = ( '' === $content )
-			? @unlink( $path ) // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.unlink_unlink -- removing a now-empty file we created
-			: ( false !== @file_put_contents( $path, $content . "\n" ) ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
-
-		if ( ! $written ) {
-			return new WP_Error( 'is_htaccess_unwritable', __( 'Could not update the uploads .htaccess file — check directory permissions.', 'integrity-sentinel' ) );
-		}
-		IS_Audit_Log::record( 'uploads_block_removed', array( 'path' => $path ) );
-		return true;
+		$uploads = wp_upload_dir();
+		return self::remove_block_for( $uploads['basedir'] );
 	}
 
 	// ---------------------------------------------------------------
@@ -112,6 +174,7 @@ class IS_Hardening {
 
 	/**
 	 * Records every hardening finding for a run.
+	 *
 	 * @return int Number of NEW findings.
 	 */
 	public function run_checks( $run_id, IS_DB $db ) {
@@ -138,7 +201,46 @@ class IS_Hardening {
 			$this->check_remote_exposures(),
 			$this->check_administrators(),
 			$this->check_closed_plugins(),
-			$this->check_core_update()
+			$this->check_core_update(),
+			$this->check_dangerous_functions()
+		);
+	}
+
+	const DANGEROUS_SHELL_FUNCTIONS = array( 'exec', 'shell_exec', 'system', 'passthru', 'popen', 'proc_open', 'pcntl_exec' );
+
+	/**
+	 * Pure: which of the dangerous shell-execution functions are NOT
+	 * listed in a disable_functions ini value. No WordPress/ini calls --
+	 * unit-testable on its own.
+	 */
+	public static function still_enabled_dangerous_functions( $disable_functions_value ) {
+		$disabled = array_filter( array_map( 'trim', explode( ',', (string) $disable_functions_value ) ) );
+		return array_values( array_diff( self::DANGEROUS_SHELL_FUNCTIONS, $disabled ) );
+	}
+
+	/**
+	 * This plugin can't itself change php.ini, but it can tell the site
+	 * owner exactly what to change: sites that don't need shell_exec()
+	 * and friends are meaningfully safer with them disabled at the PHP
+	 * engine level, since that closes the door on a whole class of
+	 * webshell payloads even after one has been dropped on disk.
+	 */
+	private function check_dangerous_functions() {
+		$still_enabled = self::still_enabled_dangerous_functions( ini_get( 'disable_functions' ) );
+		if ( empty( $still_enabled ) ) {
+			return array();
+		}
+		return array(
+			$this->finding(
+				'shell_functions_enabled',
+				'medium',
+				'php.ini',
+				sprintf(
+					/* translators: %s: comma-separated list of PHP function names */
+					__( 'These PHP shell-execution functions are still enabled: %s. If your hosting plan allows editing disable_functions (php.ini or a hosting control panel), disabling the ones this site doesn\'t use closes off a whole class of webshell payloads even if one gets dropped on disk.', 'integrity-sentinel' ),
+					implode( ', ', $still_enabled )
+				)
+			),
 		);
 	}
 
@@ -293,8 +395,8 @@ class IS_Hardening {
 		if ( self::uploads_block_active() ) {
 			return array();
 		}
-		$uploads  = wp_upload_dir();
-		$rel      = IS_File_Walker::relative_to_abspath( $uploads['basedir'] );
+		$uploads = wp_upload_dir();
+		$rel     = IS_File_Walker::relative_to_abspath( $uploads['basedir'] );
 		return array(
 			$this->finding(
 				'uploads_php_exec_unblocked',
@@ -344,7 +446,13 @@ class IS_Hardening {
 		}
 
 		foreach ( $targets as $t ) {
-			$response = wp_remote_get( $t['url'], array( 'timeout' => 5, 'redirection' => 0 ) );
+			$response = wp_remote_get(
+				$t['url'],
+				array(
+					'timeout'     => 5,
+					'redirection' => 0,
+				)
+			);
 			if ( is_wp_error( $response ) ) {
 				continue; // host blocks loopback requests -- can't tell, don't guess
 			}

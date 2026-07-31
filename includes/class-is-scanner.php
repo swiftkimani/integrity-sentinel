@@ -96,7 +96,10 @@ class IS_Scanner {
 	public function process_batch( $run_id ) {
 		$run = $this->db->get_run( $run_id );
 		if ( ! $run || 'running' !== $run['status'] ) {
-			return array( 'done' => true, 'error' => __( 'Scan is not running.', 'integrity-sentinel' ) );
+			return array(
+				'done'  => true,
+				'error' => __( 'Scan is not running.', 'integrity-sentinel' ),
+			);
 		}
 
 		if ( ! $this->db->acquire_scan_lock( $run_id ) ) {
@@ -120,15 +123,19 @@ class IS_Scanner {
 		$files = $this->db->get_run_files( $run_id );
 		if ( null === $files ) {
 			$this->fail_run( $run_id, __( 'Scan cursor was lost — please start a new scan.', 'integrity-sentinel' ) );
-			return array( 'done' => true, 'error' => __( 'Scan cursor was lost.', 'integrity-sentinel' ) );
+			return array(
+				'done'  => true,
+				'error' => __( 'Scan cursor was lost.', 'integrity-sentinel' ),
+			);
 		}
 
-		$settings   = $this->settings();
-		$batch_size = max( 5, (int) $settings['batch_size'] );
-		$total      = count( $files );
-		$offset     = (int) $run['cursor_offset'];
-		$deadline   = microtime( true ) + self::BATCH_TIME_BUDGET;
-		$processed  = 0;
+		$settings    = $this->settings();
+		$batch_size  = max( 5, (int) $settings['batch_size'] );
+		$total       = count( $files );
+		$offset      = (int) $run['cursor_offset'];
+		$deadline    = microtime( true ) + self::BATCH_TIME_BUDGET;
+		$processed   = 0;
+		$batch_start = microtime( true );
 
 		while ( $processed < $batch_size && ( $offset + $processed ) < $total ) {
 			$relative_path = $files[ $offset + $processed ];
@@ -143,6 +150,10 @@ class IS_Scanner {
 			if ( microtime( true ) >= $deadline ) {
 				break;
 			}
+		}
+
+		if ( $processed > 0 ) {
+			$this->record_pace( ( ( microtime( true ) - $batch_start ) * 1000 ) / $processed );
 		}
 
 		if ( ( $offset + $processed ) >= $total ) {
@@ -387,6 +398,34 @@ class IS_Scanner {
 		);
 	}
 
+	// -----------------------------------------------------------------
+	// Self-tuning pace tracking
+	// -----------------------------------------------------------------
+
+	/**
+	 * Pure: exponential moving average, weighted toward recent batches
+	 * (0.3) over history (0.7) so the estimate adapts as file sizes/host
+	 * load change, without one unusually slow or fast batch swinging it
+	 * wildly. A non-positive previous value means "no history yet".
+	 */
+	public static function next_pace_average( $previous_ms_per_file, $observed_ms_per_file ) {
+		if ( $previous_ms_per_file <= 0 ) {
+			return $observed_ms_per_file;
+		}
+		return ( $previous_ms_per_file * 0.7 ) + ( $observed_ms_per_file * 0.3 );
+	}
+
+	private function record_pace( $observed_ms_per_file ) {
+		$previous = (float) get_option( 'is_avg_ms_per_file', 0 );
+		update_option( 'is_avg_ms_per_file', self::next_pace_average( $previous, $observed_ms_per_file ), false );
+	}
+
+	/** @return float|null Observed average ms/file, or null if no run has completed a batch yet. */
+	public static function average_ms_per_file() {
+		$value = get_option( 'is_avg_ms_per_file', 0 );
+		return $value > 0 ? (float) $value : null;
+	}
+
 	/**
 	 * Runs a bulk core-checksum comparison in one pass (separate from
 	 * the batched per-file walk above, since it's one API call plus an
@@ -397,8 +436,8 @@ class IS_Scanner {
 	 * can never see it.
 	 */
 	public function check_core_integrity( $run_id ) {
-		$checker    = new IS_Core_Checksums();
-		$checksums  = $checker->get_checksums();
+		$checker   = new IS_Core_Checksums();
+		$checksums = $checker->get_checksums();
 		if ( is_wp_error( $checksums ) ) {
 			return $checksums;
 		}

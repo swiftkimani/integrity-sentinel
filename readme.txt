@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.12.0
+Stable tag: 1.13.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,17 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.13.0 =
+* New: configurable automatic scan frequency (hourly, twice daily,
+  daily, weekly) on the Settings screen, on top of the existing
+  batched/resumable/cron-driven scan engine. Both the Settings and
+  Dashboard screens now show when the next scheduled scan will run.
+* New: self-tuning pace guidance — the scanner tracks its own observed
+  milliseconds-per-file on this site (a rolling average) and shows an
+  estimate of how long the current batch size takes, so you can tell
+  if it's likely to exceed your host's PHP execution time limit before
+  finding out the hard way.
 
 = 1.12.0 =
 * New: two-factor authentication (TOTP, RFC 6238) — self-service setup

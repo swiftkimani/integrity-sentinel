@@ -3,7 +3,7 @@
  * Plugin Name:       Integrity Sentinel — Malware & File Scanner
  * Plugin URI:        https://example.com/integrity-sentinel
  * Description:       Finds what's already on your site: verifies WordPress core and plugin files against official WordPress.org checksums, flags unexpected files dropped into core and plugin directories, scans every PHP file for known malware/webshell patterns, and flags PHP files hiding in uploads. Batched, resumable scans with a live progress bar, a findings dashboard, email alerts, and a WP-CLI command.
- * Version:           1.12.0
+ * Version:           1.13.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Your Org
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'IS_VERSION', '1.12.0' );
+define( 'IS_VERSION', '1.13.0' );
 define( 'IS_PLUGIN_FILE', __FILE__ );
 define( 'IS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'IS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -88,20 +88,21 @@ function is_activate() {
 	IS_DB::instance()->create_tables();
 
 	if ( ! wp_next_scheduled( IS_CRON_DAILY_SCAN ) ) {
-		wp_schedule_event( time() + ( 2 * HOUR_IN_SECONDS ), 'daily', IS_CRON_DAILY_SCAN );
+		IS_Cron::reschedule_scan( 'daily' );
 	}
 	if ( ! get_option( 'is_scan_settings' ) ) {
 		update_option(
 			'is_scan_settings',
 			array(
-				'batch_size'          => 40,
-				'alert_email'         => get_option( 'admin_email' ),
-				'alert_on_severity'   => 'high', // critical, high, medium, low
+				'batch_size'           => 40,
+				'alert_email'          => get_option( 'admin_email' ),
+				'alert_on_severity'    => 'high', // critical, high, medium, low
 				'scan_uploads_for_php' => 1,
-				'max_file_size_kb'    => 2048, // skip pattern-scanning (not hashing) files bigger than this
-				'excluded_paths'      => "wp-content/cache\nwp-content/uploads/backup*\nwp-content/ai1wm-backups",
-				'webhook_url'         => '',
-				'deadman_days'        => 2,
+				'max_file_size_kb'     => 2048, // skip pattern-scanning (not hashing) files bigger than this
+				'excluded_paths'       => "wp-content/cache\nwp-content/uploads/backup*\nwp-content/ai1wm-backups",
+				'webhook_url'          => '',
+				'deadman_days'         => 2,
+				'scan_frequency'       => 'daily', // hourly, twicedaily, daily, weekly
 			),
 			false
 		);

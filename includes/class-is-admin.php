@@ -366,6 +366,7 @@ class IS_Admin {
 		$out['excluded_paths']       = sanitize_textarea_field( $input['excluded_paths'] ?? '' );
 		$out['webhook_url']          = esc_url_raw( $input['webhook_url'] ?? '', array( 'http', 'https' ) );
 		$out['deadman_days']         = max( 1, min( 30, (int) ( $input['deadman_days'] ?? 2 ) ) );
+		$out['scan_frequency']       = IS_Cron::normalize_frequency( $input['scan_frequency'] ?? 'daily' );
 
 		// Alert-redirection guard: whoever WAS receiving alerts gets told
 		// they no longer will. Without this, an attacker with an admin
@@ -402,6 +403,9 @@ class IS_Admin {
 		}
 		if ( $changed && $old ) {
 			IS_Audit_Log::record( 'settings_changed', array( 'keys' => $changed ) );
+		}
+		if ( in_array( 'scan_frequency', $changed, true ) ) {
+			IS_Cron::reschedule_scan( $out['scan_frequency'] );
 		}
 
 		return $out;
@@ -544,6 +548,17 @@ class IS_Admin {
 					?>
 				<?php else : ?>
 					<?php esc_html_e( 'No scan has run yet.', 'integrity-sentinel' ); ?>
+				<?php endif; ?>
+				<?php $next_scan = wp_next_scheduled( IS_CRON_DAILY_SCAN ); ?>
+				<?php if ( $next_scan ) : ?>
+					<br>
+					<?php
+					printf(
+						/* translators: %s: human-readable time until the next scheduled scan */
+						esc_html__( 'Next scheduled scan: in %s.', 'integrity-sentinel' ),
+						esc_html( human_time_diff( $next_scan ) )
+					);
+					?>
 				<?php endif; ?>
 			</p>
 
@@ -1367,7 +1382,7 @@ class IS_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$settings = wp_parse_args(
+		$settings        = wp_parse_args(
 			get_option( 'is_scan_settings', array() ),
 			array(
 				'batch_size'           => 40,
@@ -1378,8 +1393,10 @@ class IS_Admin {
 				'excluded_paths'       => '',
 				'webhook_url'          => '',
 				'deadman_days'         => 2,
+				'scan_frequency'       => 'daily',
 			)
 		);
+		$avg_ms_per_file = IS_Scanner::average_ms_per_file();
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Integrity Sentinel Settings', 'integrity-sentinel' ); ?></h1>
@@ -1387,10 +1404,46 @@ class IS_Admin {
 				<?php settings_fields( 'is_settings_group' ); ?>
 				<table class="form-table" role="presentation">
 					<tr>
+						<th scope="row"><label for="is_scan_frequency"><?php esc_html_e( 'Automatic scan frequency', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<select id="is_scan_frequency" name="is_scan_settings[scan_frequency]">
+								<?php foreach ( IS_Cron::VALID_FREQUENCIES as $frequency ) : ?>
+									<option value="<?php echo esc_attr( $frequency ); ?>" <?php selected( $settings['scan_frequency'], $frequency ); ?>><?php echo esc_html( ucfirst( $frequency ) ); ?></option>
+								<?php endforeach; ?>
+							</select>
+							<?php $next = wp_next_scheduled( IS_CRON_DAILY_SCAN ); ?>
+							<p class="description">
+								<?php
+								if ( $next ) {
+									printf(
+										/* translators: %s: human-readable time until the next scheduled scan */
+										esc_html__( 'Next scheduled scan: in %s.', 'integrity-sentinel' ),
+										esc_html( human_time_diff( $next ) )
+									);
+								} else {
+									esc_html_e( 'No scan is currently scheduled — save this page to schedule one.', 'integrity-sentinel' );
+								}
+								?>
+							</p>
+						</td>
+					</tr>
+					<tr>
 						<th scope="row"><label for="is_batch_size"><?php esc_html_e( 'Files per batch', 'integrity-sentinel' ); ?></label></th>
 						<td>
 							<input type="number" min="5" max="200" id="is_batch_size" name="is_scan_settings[batch_size]" value="<?php echo esc_attr( $settings['batch_size'] ); ?>" class="small-text">
 							<p class="description"><?php esc_html_e( 'How many files to process per AJAX request during a live scan. Lower this if your host times out on the default.', 'integrity-sentinel' ); ?></p>
+							<?php if ( null !== $avg_ms_per_file ) : ?>
+								<p class="description">
+									<?php
+									printf(
+										/* translators: 1: observed milliseconds per file, 2: estimated seconds for the current batch size */
+										esc_html__( 'Observed pace on this site: ~%1$s ms/file — your current batch size takes roughly ~%2$s seconds. If that exceeds your host\'s PHP execution time limit, lower the batch size.', 'integrity-sentinel' ),
+										esc_html( number_format_i18n( $avg_ms_per_file, 1 ) ),
+										esc_html( number_format_i18n( ( $avg_ms_per_file * (int) $settings['batch_size'] ) / 1000, 1 ) )
+									);
+									?>
+								</p>
+							<?php endif; ?>
 						</td>
 					</tr>
 					<tr>

@@ -61,3 +61,5 @@ require_once dirname( __DIR__ ) . '/includes/class-is-rest-api.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-rest-posts.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-totp.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-2fa.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-cron.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-scanner.php';

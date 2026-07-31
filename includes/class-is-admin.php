@@ -643,10 +643,141 @@ class IS_Admin {
 				<?php esc_html_e( 'Themes, mu-plugins, and premium/custom plugins have no published WordPress.org checksums, so they can\'t be checksum-verified — their PHP files are still covered by the malware-pattern scan.', 'integrity-sentinel' ); ?>
 			</p>
 			<p class="description">
-				<?php esc_html_e( "This is a file-integrity and pattern scanner, not a full security suite: it doesn't include a firewall, login-attack protection, or a global threat-intelligence feed. It's built to answer one question well: \"is there anything on this site that shouldn't be here?\"", 'integrity-sentinel' ); ?>
+				<?php esc_html_e( 'Started as a file-integrity and pattern scanner and has grown into a full hardening suite: access control, login/2FA protection, a REST firewall, hotlink/bot blocking, and a human-in-the-loop quarantine engine — all summarized below. Every feature is off-by-default when it could break something (XML-RPC, feeds, REST lockdown, login rename), and on-by-default when it can\'t.', 'integrity-sentinel' ); ?>
 			</p>
 
+			<?php $this->render_security_status(); ?>
 			<?php $this->render_feature_health(); ?>
+		</div>
+		<?php
+	}
+
+	/**
+	 * One place to see the state of every hardening feature this plugin
+	 * ships, each linking straight to where it's configured -- the
+	 * "unified" view the settings are scattered across several
+	 * WP-admin-convention submenu pages (Hardening, Access Control,
+	 * Login Security, REST API) rather than physically merged into one,
+	 * since that's how every other security plugin's settings are
+	 * organized and users already know that pattern.
+	 *
+	 * @return array<array{label:string,ok:bool,text:string,url:string}>
+	 */
+	private function security_status_items() {
+		$headers      = IS_Headers::settings();
+		$ip           = IS_IP_List::settings();
+		$login_rename = IS_Login::rename_settings();
+		$throttle     = IS_Login::throttle_settings();
+		$bots         = IS_Bot_Block::settings();
+		$rest         = IS_Rest_API::settings();
+		$posts        = IS_Rest_Posts::settings();
+		$two_factor   = IS_2FA::settings();
+		$pending      = IS_DB::instance()->count_quarantine_items( 'quarantined' );
+
+		$whitelist_count = count( IS_IP_List::parse_list_text( $ip['whitelist'] ) );
+		$blacklist_count = count( IS_IP_List::parse_list_text( $ip['blacklist'] ) );
+
+		$hardening_url = admin_url( 'admin.php?page=integrity-sentinel-hardening' );
+		$access_url    = admin_url( 'admin.php?page=integrity-sentinel-access' );
+		$login_url     = admin_url( 'admin.php?page=integrity-sentinel-login' );
+		$rest_url      = admin_url( 'admin.php?page=integrity-sentinel-rest' );
+
+		return array(
+			array(
+				'label' => __( 'Security headers', 'integrity-sentinel' ),
+				'ok'    => ! empty( $headers['security_headers'] ) && ! empty( $headers['prevent_clickjacking'] ),
+				'text'  => ( ! empty( $headers['security_headers'] ) && ! empty( $headers['prevent_clickjacking'] ) ) ? __( 'Active', 'integrity-sentinel' ) : __( 'Partially off', 'integrity-sentinel' ),
+				'url'   => $hardening_url,
+			),
+			array(
+				'label' => __( 'Hide WP version', 'integrity-sentinel' ),
+				'ok'    => ! empty( $headers['hide_wp_version'] ),
+				'text'  => ! empty( $headers['hide_wp_version'] ) ? __( 'Hidden', 'integrity-sentinel' ) : __( 'Visible', 'integrity-sentinel' ),
+				'url'   => $hardening_url,
+			),
+			array(
+				'label' => __( 'XML-RPC', 'integrity-sentinel' ),
+				'ok'    => ! empty( $headers['disable_xmlrpc'] ),
+				'text'  => ! empty( $headers['disable_xmlrpc'] ) ? __( 'Disabled', 'integrity-sentinel' ) : __( 'Enabled', 'integrity-sentinel' ),
+				'url'   => $hardening_url,
+			),
+			array(
+				'label' => __( 'RSS/Atom feeds', 'integrity-sentinel' ),
+				'ok'    => ! empty( $headers['disable_feeds'] ),
+				'text'  => ! empty( $headers['disable_feeds'] ) ? __( 'Disabled', 'integrity-sentinel' ) : __( 'Enabled', 'integrity-sentinel' ),
+				'url'   => $hardening_url,
+			),
+			array(
+				'label' => __( 'Hotlink protection', 'integrity-sentinel' ),
+				'ok'    => IS_Hotlink::active(),
+				'text'  => IS_Hotlink::active() ? __( 'Protected', 'integrity-sentinel' ) : __( 'Not blocked', 'integrity-sentinel' ),
+				'url'   => $hardening_url,
+			),
+			array(
+				'label' => __( 'IP access control', 'integrity-sentinel' ),
+				'ok'    => true,
+				/* translators: 1: whitelisted count, 2: blacklisted count */
+				'text'  => sprintf( __( '%1$d whitelisted, %2$d blacklisted', 'integrity-sentinel' ), $whitelist_count, $blacklist_count ),
+				'url'   => $access_url,
+			),
+			array(
+				'label' => __( 'AI bot blocking', 'integrity-sentinel' ),
+				'ok'    => ! empty( $bots['enabled'] ),
+				'text'  => ! empty( $bots['enabled'] ) ? __( 'Active', 'integrity-sentinel' ) : __( 'Off', 'integrity-sentinel' ),
+				'url'   => $access_url,
+			),
+			array(
+				'label' => __( 'Login URL', 'integrity-sentinel' ),
+				'ok'    => '' !== $login_rename['login_slug'],
+				'text'  => '' !== $login_rename['login_slug'] ? __( 'Hidden', 'integrity-sentinel' ) : __( 'Default', 'integrity-sentinel' ),
+				'url'   => $login_url,
+			),
+			array(
+				'label' => __( 'Login rate limiting', 'integrity-sentinel' ),
+				'ok'    => ! empty( $throttle['enabled'] ),
+				'text'  => ! empty( $throttle['enabled'] ) ? __( 'Active', 'integrity-sentinel' ) : __( 'Off', 'integrity-sentinel' ),
+				'url'   => $login_url,
+			),
+			array(
+				'label' => __( 'Two-factor authentication', 'integrity-sentinel' ),
+				'ok'    => ! empty( $two_factor['enforced_roles'] ),
+				/* translators: %d: number of roles */
+				'text'  => ! empty( $two_factor['enforced_roles'] ) ? sprintf( __( 'Required for %d role(s)', 'integrity-sentinel' ), count( $two_factor['enforced_roles'] ) ) : __( 'Optional', 'integrity-sentinel' ),
+				'url'   => $login_url,
+			),
+			array(
+				'label' => __( 'REST user enumeration', 'integrity-sentinel' ),
+				'ok'    => ! empty( $rest['block_user_enumeration'] ),
+				'text'  => ! empty( $rest['block_user_enumeration'] ) ? __( 'Blocked', 'integrity-sentinel' ) : __( 'Allowed', 'integrity-sentinel' ),
+				'url'   => $rest_url,
+			),
+			array(
+				'label' => __( 'Blog post endpoint', 'integrity-sentinel' ),
+				'ok'    => true,
+				'text'  => ! empty( $posts['enabled'] ) ? __( 'Enabled', 'integrity-sentinel' ) : __( 'Disabled', 'integrity-sentinel' ),
+				'url'   => $rest_url,
+			),
+			array(
+				'label' => __( 'Quarantine', 'integrity-sentinel' ),
+				'ok'    => 0 === $pending,
+				/* translators: %d: number of items awaiting review */
+				'text'  => $pending > 0 ? sprintf( _n( '%d item awaiting review', '%d items awaiting review', $pending, 'integrity-sentinel' ), $pending ) : __( 'Nothing pending', 'integrity-sentinel' ),
+				'url'   => admin_url( 'admin.php?page=integrity-sentinel-quarantine' ),
+			),
+		);
+	}
+
+	private function render_security_status() {
+		?>
+		<h2><?php esc_html_e( 'Security status', 'integrity-sentinel' ); ?></h2>
+		<div class="is-status-grid">
+			<?php foreach ( $this->security_status_items() as $item ) : ?>
+				<a class="is-status-item <?php echo $item['ok'] ? 'is-status-ok' : 'is-status-warn'; ?>" href="<?php echo esc_url( $item['url'] ); ?>">
+					<span class="is-status-dot" aria-hidden="true"></span>
+					<span class="is-status-label"><?php echo esc_html( $item['label'] ); ?></span>
+					<span class="is-status-value"><?php echo esc_html( $item['text'] ); ?></span>
+				</a>
+			<?php endforeach; ?>
 		</div>
 		<?php
 	}

@@ -144,6 +144,27 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_rest_posts_settings' ),
 			)
 		);
+		register_setting(
+			'is_2fa_settings_group',
+			'is_2fa_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_2fa_settings' ),
+			)
+		);
+	}
+
+	public function sanitize_2fa_settings( $input ) {
+		$old         = IS_2FA::settings();
+		$valid_roles = array_keys( wp_roles()->get_names() );
+		$requested   = isset( $input['enforced_roles'] ) && is_array( $input['enforced_roles'] ) ? $input['enforced_roles'] : array();
+		$out         = array( 'enforced_roles' => array_values( array_intersect( $valid_roles, $requested ) ) );
+
+		if ( $out['enforced_roles'] !== $old['enforced_roles'] ) {
+			IS_Audit_Log::record( '2fa_enforcement_changed', array( 'roles' => $out['enforced_roles'] ) );
+		}
+
+		return $out;
 	}
 
 	public function sanitize_rest_api_settings( $input ) {
@@ -1100,8 +1121,9 @@ class IS_Admin {
 			return;
 		}
 		settings_errors( 'is_login_rename_settings' );
-		$rename   = IS_Login::rename_settings();
-		$throttle = IS_Login::throttle_settings();
+		$rename     = IS_Login::rename_settings();
+		$throttle   = IS_Login::throttle_settings();
+		$two_factor = IS_2FA::settings();
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Login Security', 'integrity-sentinel' ); ?></h1>
@@ -1155,6 +1177,38 @@ class IS_Admin {
 					</tr>
 				</table>
 				<?php submit_button( __( 'Save rate limiting settings', 'integrity-sentinel' ) ); ?>
+			</form>
+
+			<h2><?php esc_html_e( 'Two-factor authentication', 'integrity-sentinel' ); ?></h2>
+			<p class="description">
+				<?php
+				printf(
+					/* translators: %s: URL to the user's own profile page */
+					wp_kses(
+						__( 'Every user sets up their own two-factor authentication from <a href="%s">their profile page</a> — it cannot be set up on someone else\'s behalf. The setting below only controls whether it\'s required.', 'integrity-sentinel' ),
+						array( 'a' => array( 'href' => array() ) )
+					),
+					esc_url( admin_url( 'profile.php#is-2fa' ) )
+				);
+				?>
+			</p>
+			<form method="post" action="options.php">
+				<?php settings_fields( 'is_2fa_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Require for roles', 'integrity-sentinel' ); ?></th>
+						<td>
+							<?php foreach ( wp_roles()->get_names() as $role_slug => $role_label ) : ?>
+								<label style="display:block;">
+									<input type="checkbox" name="is_2fa_settings[enforced_roles][]" value="<?php echo esc_attr( $role_slug ); ?>" <?php checked( in_array( $role_slug, $two_factor['enforced_roles'], true ) ); ?>>
+									<?php echo esc_html( translate_user_role( $role_label ) ); ?>
+								</label>
+							<?php endforeach; ?>
+							<p class="description"><?php esc_html_e( 'Enforcement never blocks login: a user in a required role who hasn\'t set it up yet is redirected to their profile to set it up, rather than locked out.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save two-factor authentication settings', 'integrity-sentinel' ) ); ?>
 			</form>
 		</div>
 		<?php

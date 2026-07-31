@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.11.0
+Stable tag: 1.12.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,20 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.12.0 =
+* New: two-factor authentication (TOTP, RFC 6238) — self-service setup
+  from each user's own profile page, requiring one valid code before
+  it's actually enabled so a mistyped/unsynced authenticator app can
+  never lock a user out. Eight single-use recovery codes (SHA-256
+  hashed, shown once) for lost-device recovery. Optional per-role
+  enforcement on the Login Security screen — enforcement never blocks
+  login itself, it redirects an unset-up user to their profile instead,
+  which is what makes it safe to turn on without warning everyone
+  first. No QR code image is rendered (would need either a bundled
+  third-party JS library or an external service call that would leak
+  the secret); the manual-entry key and otpauth:// link work with
+  every authenticator app as the standard "can't scan a code" fallback.
 
 = 1.11.0 =
 * New: REST API screen. Blocks unauthenticated /wp/v2/users access and

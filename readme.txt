@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.10.0
+Stable tag: 1.11.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,17 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.11.0 =
+* New: REST API screen. Blocks unauthenticated /wp/v2/users access and
+  the old ?author=N enumeration redirect by default (safe for any
+  site). Optional full lockdown of unauthenticated REST access with an
+  allowed-route allowlist, off by default since many themes/plugins
+  depend on public REST routes.
+* New: integrity-sentinel/v1/posts REST endpoint for creating blog
+  posts from an external tool, authenticated with WordPress's own
+  Application Passwords (no bespoke secret store), scoped by ordinary
+  edit_posts/publish_posts capabilities, and rate-limited per user.
 
 = 1.10.0 =
 * New: hotlink protection (Hardening screen) — writes a marker-delimited

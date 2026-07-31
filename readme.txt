@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.6.0
+Stable tag: 1.7.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,23 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.7.0 =
+* New: upload-time blocking of executable file types (.php and
+  variants, .cgi, .pl, .py, .sh, .asp/.aspx, .jsp, .exe, .phar, ...) —
+  applies to the media uploader, plugin/theme install-by-upload, and
+  any importer using wp_handle_upload(). Catches double-extension
+  disguises (e.g. shell.php.jpg) too. Always on; never affects
+  legitimate media.
+* New: the PHP-execution .htaccess block (previously uploads-only) now
+  also covers wp-content/cache, wp-content/upgrade, and
+  wp-content/temp when present — other writable, commonly-abused
+  secondary drop locations for a webshell. Same one-click apply/remove
+  as uploads, per directory, on the Hardening screen.
+* New: hardening check reporting which PHP shell-execution functions
+  (exec, shell_exec, system, passthru, popen, proc_open, pcntl_exec)
+  are still enabled, with the exact disable_functions value to set if
+  your hosting plan allows it.
 
 = 1.6.0 =
 * New: Login Security screen with two independent, off-by-default-safe

@@ -62,4 +62,27 @@ class HardeningTest extends TestCase {
 		$this->assertStringContainsString( 'uploads', $snippet );
 		$this->assertStringContainsString( 'deny all', $snippet );
 	}
+
+	// ---- dangerous shell functions ----------------------------------
+
+	public function test_all_dangerous_functions_reported_when_none_disabled() {
+		$this->assertSame( IS_Hardening::DANGEROUS_SHELL_FUNCTIONS, IS_Hardening::still_enabled_dangerous_functions( '' ) );
+	}
+
+	public function test_disabled_functions_are_excluded() {
+		$still = IS_Hardening::still_enabled_dangerous_functions( 'exec,shell_exec,system' );
+		$this->assertNotContains( 'exec', $still );
+		$this->assertNotContains( 'shell_exec', $still );
+		$this->assertContains( 'proc_open', $still );
+	}
+
+	public function test_all_disabled_reports_none_still_enabled() {
+		$this->assertSame( array(), IS_Hardening::still_enabled_dangerous_functions( implode( ',', IS_Hardening::DANGEROUS_SHELL_FUNCTIONS ) ) );
+	}
+
+	public function test_handles_whitespace_around_entries() {
+		$still = IS_Hardening::still_enabled_dangerous_functions( ' exec , shell_exec ,system ' );
+		$this->assertNotContains( 'exec', $still );
+		$this->assertNotContains( 'system', $still );
+	}
 }

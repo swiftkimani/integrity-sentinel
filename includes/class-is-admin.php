@@ -21,6 +21,8 @@ class IS_Admin {
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue' ) );
 		add_action( 'admin_post_is_apply_uploads_block', array( $this, 'handle_apply_uploads_block' ) );
 		add_action( 'admin_post_is_remove_uploads_block', array( $this, 'handle_remove_uploads_block' ) );
+		add_action( 'admin_post_is_apply_exec_block', array( $this, 'handle_apply_exec_block' ) );
+		add_action( 'admin_post_is_remove_exec_block', array( $this, 'handle_remove_exec_block' ) );
 		add_action( 'admin_post_is_reset_module_health', array( $this, 'handle_reset_module_health' ) );
 	}
 
@@ -282,6 +284,32 @@ class IS_Admin {
 		$this->guard_hardening_action();
 		$result = IS_Hardening::remove_uploads_block();
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
+	}
+
+	public function handle_apply_exec_block() {
+		$this->guard_hardening_action();
+		$target = $this->resolve_exec_block_target();
+		$result = $target ? IS_Hardening::apply_block_for( $target['abs_path'] ) : new WP_Error( 'is_unknown_target', __( 'Unknown directory.', 'integrity-sentinel' ) );
+		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
+	}
+
+	public function handle_remove_exec_block() {
+		$this->guard_hardening_action();
+		$target = $this->resolve_exec_block_target();
+		$result = $target ? IS_Hardening::remove_block_for( $target['abs_path'] ) : new WP_Error( 'is_unknown_target', __( 'Unknown directory.', 'integrity-sentinel' ) );
+		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
+	}
+
+	/**
+	 * Resolves the POSTed target *key* to a server-known absolute path --
+	 * the path itself is never accepted from the request, only one of a
+	 * fixed set of keys, so this can't be turned into an arbitrary
+	 * .htaccess-write primitive.
+	 */
+	private function resolve_exec_block_target() {
+		$key     = isset( $_POST['target'] ) ? sanitize_key( wp_unslash( $_POST['target'] ) ) : '';
+		$targets = IS_Hardening::exec_block_targets();
+		return isset( $targets[ $key ] ) ? $targets[ $key ] : null;
 	}
 
 	public function handle_reset_module_health() {
@@ -623,6 +651,8 @@ class IS_Admin {
 			</p>
 			<pre><?php echo esc_html( IS_Hardening::nginx_snippet() ); ?></pre>
 
+			<?php $this->render_other_exec_block_targets(); ?>
+
 			<?php $this->render_http_hardening_section(); ?>
 
 			<h2><?php esc_html_e( 'Hardening checks', 'integrity-sentinel' ); ?></h2>
@@ -630,6 +660,60 @@ class IS_Admin {
 				<?php esc_html_e( 'Every scan also audits site configuration: the file editor, debug output, auth salts, world-writable paths, exposed .git/.env/debug.log files, backup archives in the webroot, administrator accounts, plugins closed on WordPress.org, and more. Results appear under Findings alongside file-integrity issues.', 'integrity-sentinel' ); ?>
 			</p>
 		</div>
+		<?php
+	}
+
+	/**
+	 * Other writable, commonly-abused directories (cache/upgrade/temp)
+	 * that benefit from the same PHP-execution block as uploads. Only
+	 * directories that actually exist on this install are listed.
+	 */
+	private function render_other_exec_block_targets() {
+		$targets = IS_Hardening::exec_block_targets();
+		unset( $targets['uploads'] ); // covered by its own dedicated section above
+		if ( empty( $targets ) ) {
+			return;
+		}
+		?>
+		<h2><?php esc_html_e( 'Block PHP execution in other writable directories', 'integrity-sentinel' ); ?></h2>
+		<p class="description"><?php esc_html_e( 'Caches, upgrade staging, and temp directories are writable by WordPress and are common secondary drop locations for a webshell. Same protection as uploads, applied per directory.', 'integrity-sentinel' ); ?></p>
+		<table class="widefat striped" style="max-width:700px;">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'Directory', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'Status', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'Action', 'integrity-sentinel' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $targets as $key => $target ) : ?>
+					<?php $active = IS_Hardening::block_active_for( $target['abs_path'] ); ?>
+					<tr>
+						<td><?php echo esc_html( $target['label'] ); ?></td>
+						<td>
+							<?php if ( $active ) : ?>
+								<span class="is-badge is-badge-low"><?php esc_html_e( 'Protected', 'integrity-sentinel' ); ?></span>
+							<?php else : ?>
+								<span class="is-badge is-badge-high"><?php esc_html_e( 'Not blocked', 'integrity-sentinel' ); ?></span>
+							<?php endif; ?>
+						</td>
+						<td>
+							<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+								<?php wp_nonce_field( 'is_hardening_action' ); ?>
+								<input type="hidden" name="target" value="<?php echo esc_attr( $key ); ?>">
+								<?php if ( $active ) : ?>
+									<input type="hidden" name="action" value="is_remove_exec_block">
+									<?php submit_button( __( 'Remove', 'integrity-sentinel' ), 'secondary small', 'submit', false ); ?>
+								<?php else : ?>
+									<input type="hidden" name="action" value="is_apply_exec_block">
+									<?php submit_button( __( 'Apply', 'integrity-sentinel' ), 'primary small', 'submit', false ); ?>
+								<?php endif; ?>
+							</form>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
 		<?php
 	}
 

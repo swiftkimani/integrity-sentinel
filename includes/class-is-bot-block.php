@@ -57,7 +57,13 @@ class IS_Bot_Block {
 	}
 
 	private function hooks() {
-		add_action( 'plugins_loaded', array( $this, 'maybe_block' ), 1 );
+		// 'init', not 'plugins_loaded': this class is instantiated from
+		// is_init(), itself a 'plugins_loaded' callback -- a callback
+		// registered for 'plugins_loaded' from inside another
+		// 'plugins_loaded' callback is registered too late to ever run,
+		// since that hook fires exactly once per request. 'init' fires
+		// immediately after and hasn't happened yet at this point.
+		add_action( 'init', array( $this, 'maybe_block' ), 1 );
 		add_filter( 'robots_txt', array( $this, 'filter_robots_txt' ) );
 	}
 

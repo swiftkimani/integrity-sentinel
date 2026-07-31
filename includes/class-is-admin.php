@@ -19,6 +19,7 @@ class IS_Admin {
 		add_action( 'admin_menu', array( $this, 'add_menu' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue' ) );
+		add_action( 'admin_head', array( $this, 'hide_native_submenu' ) );
 		add_action( 'admin_post_is_apply_uploads_block', array( $this, 'handle_apply_uploads_block' ) );
 		add_action( 'admin_post_is_remove_uploads_block', array( $this, 'handle_remove_uploads_block' ) );
 		add_action( 'admin_post_is_apply_exec_block', array( $this, 'handle_apply_exec_block' ) );
@@ -50,6 +51,138 @@ class IS_Admin {
 		add_submenu_page( 'integrity-sentinel', __( 'REST API', 'integrity-sentinel' ), __( 'REST API', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-rest', array( $this, 'render_rest_api' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Audit Log', 'integrity-sentinel' ), __( 'Audit Log', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-audit', array( $this, 'render_audit_log' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Settings', 'integrity-sentinel' ), __( 'Settings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-settings', array( $this, 'render_settings' ) );
+
+		// Every page above stays fully registered with add_submenu_page()
+		// on purpose -- WordPress's own access check (user_can_access_
+		// admin_page(), which every admin.php?page=X request runs
+		// through) resolves a page's required capability by looking it
+		// up in the very $submenu entries add_submenu_page() creates.
+		// remove_submenu_page() was tried here first and rejects access
+		// to every page it touches ("Sorry, you are not allowed to
+		// access this page.") for exactly that reason -- it deletes the
+		// $submenu entry those checks depend on, not just the visible
+		// row. So instead of removing anything, the native flyout is
+		// simply hidden with CSS (hide_native_submenu()) while
+		// navigation between pages happens through this plugin's own
+		// in-page sidebar (render_shell_open()) -- the result is still
+		// one single clean "Integrity Sentinel" entry in the WP admin
+		// menu, achieved without breaking WordPress's own bookkeeping.
+	}
+
+	/** Hides WP's native submenu flyout for this plugin only; see add_menu() for why. */
+	public function hide_native_submenu() {
+		$screen = get_current_screen();
+		if ( ! $screen || false === strpos( $screen->id, 'integrity-sentinel' ) ) {
+			return;
+		}
+		echo '<style>#adminmenu #toplevel_page_integrity-sentinel > ul.wp-submenu { display: none !important; }</style>';
+	}
+
+	/**
+	 * The single source of truth for the app-shell sidebar, in display
+	 * order. Kept as one array (rather than re-listing labels/slugs
+	 * inline at every call site) so the nav, the WP-submenu-hiding loop
+	 * above, and any future breadcrumb/search feature all stay in sync
+	 * automatically.
+	 */
+	private function nav_items() {
+		return array(
+			array(
+				'key'   => 'dashboard',
+				'label' => __( 'Dashboard', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel',
+				'icon'  => 'dashicons-dashboard',
+			),
+			array(
+				'key'   => 'findings',
+				'label' => __( 'Findings', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-findings',
+				'icon'  => 'dashicons-flag',
+			),
+			array(
+				'key'   => 'quarantine',
+				'label' => __( 'Quarantine', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-quarantine',
+				'icon'  => 'dashicons-lock',
+			),
+			array(
+				'key'   => 'hardening',
+				'label' => __( 'Hardening', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-hardening',
+				'icon'  => 'dashicons-shield-alt',
+			),
+			array(
+				'key'   => 'access',
+				'label' => __( 'Access Control', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-access',
+				'icon'  => 'dashicons-admin-network',
+			),
+			array(
+				'key'   => 'login',
+				'label' => __( 'Login Security', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-login',
+				'icon'  => 'dashicons-admin-users',
+			),
+			array(
+				'key'   => 'rest',
+				'label' => __( 'REST API', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-rest',
+				'icon'  => 'dashicons-rest-api',
+			),
+			array(
+				'key'   => 'audit',
+				'label' => __( 'Audit Log', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-audit',
+				'icon'  => 'dashicons-list-view',
+			),
+			array(
+				'key'   => 'settings',
+				'label' => __( 'Settings', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-settings',
+				'icon'  => 'dashicons-admin-generic',
+			),
+		);
+	}
+
+	/**
+	 * Opens the app shell: a fixed left sidebar (this plugin's own,
+	 * replacing reliance on WP's now-hidden submenu flyout) plus the
+	 * content pane every render_*() method's markup lives inside.
+	 * Always paired with render_shell_close().
+	 */
+	private function render_shell_open( $active_key ) {
+		?>
+		<div class="is-shell">
+			<nav class="is-shell-nav" aria-label="<?php esc_attr_e( 'Integrity Sentinel sections', 'integrity-sentinel' ); ?>">
+				<div class="is-shell-brand">
+					<span class="is-shell-logo dashicons dashicons-shield" aria-hidden="true"></span>
+					<span class="is-shell-title"><?php esc_html_e( 'Integrity Sentinel', 'integrity-sentinel' ); ?></span>
+				</div>
+				<ul class="is-shell-nav-list">
+					<?php foreach ( $this->nav_items() as $item ) : ?>
+						<li>
+							<a
+								href="<?php echo esc_url( admin_url( 'admin.php?page=' . $item['slug'] ) ); ?>"
+								class="is-shell-nav-link<?php echo $active_key === $item['key'] ? ' is-active' : ''; ?>"
+								<?php echo $active_key === $item['key'] ? 'aria-current="page"' : ''; ?>
+							>
+								<span class="dashicons <?php echo esc_attr( $item['icon'] ); ?>" aria-hidden="true"></span>
+								<span><?php echo esc_html( $item['label'] ); ?></span>
+							</a>
+						</li>
+					<?php endforeach; ?>
+				</ul>
+				<div class="is-shell-version">Integrity Sentinel <?php echo esc_html( IS_VERSION ); ?></div>
+			</nav>
+			<main class="is-shell-content">
+		<?php
+	}
+
+	private function render_shell_close() {
+		?>
+			</main>
+		</div>
+		<?php
 	}
 
 	public function enqueue( $hook ) {
@@ -570,6 +703,7 @@ class IS_Admin {
 		$latest  = $db->get_latest_run();
 		$counts  = $db->severity_counts( 'new' );
 		$running = $db->get_running_run();
+		$this->render_shell_open( 'dashboard' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Integrity Sentinel', 'integrity-sentinel' ); ?></h1>
@@ -650,6 +784,7 @@ class IS_Admin {
 			<?php $this->render_feature_health(); ?>
 		</div>
 		<?php
+		$this->render_shell_close();
 	}
 
 	/**
@@ -882,6 +1017,7 @@ class IS_Admin {
 		);
 		$pages    = max( 1, (int) ceil( $total / $per_page ) );
 		$error    = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$this->render_shell_open( 'findings' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Findings', 'integrity-sentinel' ); ?></h1>
@@ -994,6 +1130,7 @@ class IS_Admin {
 			</div>
 		</div>
 		<?php
+		$this->render_shell_close();
 	}
 
 	// -----------------------------------------------------------------
@@ -1020,6 +1157,7 @@ class IS_Admin {
 		$items = $db->get_quarantine_items( $status, $per_page, ( $paged - 1 ) * $per_page );
 		$total = $db->count_quarantine_items( $status );
 		$pages = max( 1, (int) ceil( $total / $per_page ) );
+		$this->render_shell_open( 'quarantine' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Quarantine', 'integrity-sentinel' ); ?></h1>
@@ -1122,6 +1260,7 @@ class IS_Admin {
 			<?php endif; ?>
 		</div>
 		<?php
+		$this->render_shell_close();
 	}
 
 	// -----------------------------------------------------------------
@@ -1134,6 +1273,7 @@ class IS_Admin {
 		}
 		$active = IS_Hardening::uploads_block_active();
 		$error  = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$this->render_shell_open( 'hardening' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Hardening', 'integrity-sentinel' ); ?></h1>
@@ -1183,6 +1323,7 @@ class IS_Admin {
 			</p>
 		</div>
 		<?php
+		$this->render_shell_close();
 	}
 
 	/**
@@ -1376,6 +1517,7 @@ class IS_Admin {
 		$settings  = IS_IP_List::settings();
 		$your_ip   = IS_IP_List::client_ip();
 		$bot_block = IS_Bot_Block::settings();
+		$this->render_shell_open( 'access' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Access Control', 'integrity-sentinel' ); ?></h1>
@@ -1461,6 +1603,7 @@ class IS_Admin {
 			</form>
 		</div>
 		<?php
+		$this->render_shell_close();
 	}
 
 	// -----------------------------------------------------------------
@@ -1475,6 +1618,7 @@ class IS_Admin {
 		$rename     = IS_Login::rename_settings();
 		$throttle   = IS_Login::throttle_settings();
 		$two_factor = IS_2FA::settings();
+		$this->render_shell_open( 'login' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Login Security', 'integrity-sentinel' ); ?></h1>
@@ -1563,6 +1707,7 @@ class IS_Admin {
 			</form>
 		</div>
 		<?php
+		$this->render_shell_close();
 	}
 
 	// -----------------------------------------------------------------
@@ -1576,6 +1721,7 @@ class IS_Admin {
 		$api      = IS_Rest_API::settings();
 		$posts    = IS_Rest_Posts::settings();
 		$endpoint = rest_url( 'integrity-sentinel/v1/posts' );
+		$this->render_shell_open( 'rest' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'REST API', 'integrity-sentinel' ); ?></h1>
@@ -1642,6 +1788,7 @@ class IS_Admin {
 			</form>
 		</div>
 		<?php
+		$this->render_shell_close();
 	}
 
 	// -----------------------------------------------------------------
@@ -1657,6 +1804,7 @@ class IS_Admin {
 		$entries  = IS_Audit_Log::entries( $per_page, ( $paged - 1 ) * $per_page );
 		$total    = IS_Audit_Log::count();
 		$pages    = max( 1, (int) ceil( $total / $per_page ) );
+		$this->render_shell_open( 'audit' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Audit Log', 'integrity-sentinel' ); ?></h1>
@@ -1708,6 +1856,7 @@ class IS_Admin {
 			<?php endif; ?>
 		</div>
 		<?php
+		$this->render_shell_close();
 	}
 
 	// -----------------------------------------------------------------
@@ -1733,6 +1882,7 @@ class IS_Admin {
 			)
 		);
 		$avg_ms_per_file = IS_Scanner::average_ms_per_file();
+		$this->render_shell_open( 'settings' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Integrity Sentinel Settings', 'integrity-sentinel' ); ?></h1>
@@ -1838,5 +1988,6 @@ class IS_Admin {
 			</form>
 		</div>
 		<?php
+		$this->render_shell_close();
 	}
 }

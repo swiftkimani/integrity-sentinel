@@ -1,8 +1,8 @@
 {
-    "assets/css/is-admin.css": "58d709b350ed0f918bc9edff120170ad3bd6b81429280d20f99a19f4b5b9776b",
+    "assets/css/is-admin.css": "41b83f016bbccc464675d46c8e2aa40c2592252b9119f386b81e5883684738e7",
     "assets/js/is-admin.js": "2000ce0dbae0ec7d929d1cac95b0aa24270221b23852f730e9ea032900051239",
     "includes/class-is-2fa.php": "1a8cd2a4440c2c2bf8a541f5f7a3a3122b57e4fb8a6715f054f7e8fbe8d000e8",
-    "includes/class-is-admin.php": "db78a2e79e4135e13966e2b4dd3de24b557b6c27d894eb5f4ad4de5fcd0c292f",
+    "includes/class-is-admin.php": "8a59eceb37c2dcbc4fe65b76ba658b846e857d3d73a7e91fc4732ccf9acb46ef",
     "includes/class-is-ajax.php": "6eb4d0157ec226187d02fea4098c3afd9a189ec834acf529c72169069e4bf496",
     "includes/class-is-audit-log.php": "26a043fab8f92c25e905f7404b5d1d7f8edd7251205ffa8fc6cca5de84eb14bf",
     "includes/class-is-bot-block.php": "c2455037b3b93c7b78fa0ad764a445d1102118807736bb17f947c08d3842e687",
@@ -27,6 +27,6 @@
     "includes/class-is-totp.php": "ffb38a4812f033ab7de73d75f4bbdfb309ca05e77e6d465ec7a11c2fc5868d87",
     "includes/class-is-update-monitor.php": "3af2c1a01eff230f4f35e7069a3a50a106a20a84c7bdba1982d2364074fc52ff",
     "includes/class-is-upload-guard.php": "c0c98e530442494c5fef1f22a98041995e79dec41b672815bc71074f61cd69c9",
-    "integrity-sentinel.php": "40de5c19c65a619a3c82750f27dfc9ee648256424d67b83fedf4863a03cfe2e3",
+    "integrity-sentinel.php": "b60cd6f52cb776db9dce7ac670f0ebf5cc941b53f5d98eb8a5ed99ce120369c0",
     "uninstall.php": "31fd5d17ba898b944761a5c33c8a7c60336f412c87860d08d40bbe0a2950e6b3"
 }

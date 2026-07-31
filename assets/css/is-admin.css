@@ -1,19 +1,135 @@
 :root {
-	--is-radius: 6px;
-	--is-border: #dcdcde;
-	--is-muted: #646970;
+	--is-radius: 10px;
+	--is-radius-lg: 16px;
+	--is-border: #e2e8f0;
+	--is-muted: #64748b;
 	--is-bg-card: #fff;
-	--is-blue: #2271b1;
+	--is-bg-page: #f8fafc;
+	--is-ink: #0f172a;
+	--is-blue: #4f46e5;
+	--is-blue-dark: #4338ca;
 	--is-critical: #b32d2e;
 	--is-high: #d63638;
 	--is-medium: #dba617;
-	--is-low: #2271b1;
-	--is-ok: #00a32a;
+	--is-low: #4f46e5;
+	--is-ok: #16a34a;
+	--is-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	--is-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+	--is-shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
 }
 
-.is-wrap { max-width: 1200px; }
+.is-wrap { max-width: 1200px; font-family: var(--is-font); }
 
-.is-wrap h2 { margin-top: 2em; }
+.is-wrap h1 {
+	font-size: 1.6em;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	color: var(--is-ink);
+	margin-bottom: 4px;
+}
+
+.is-wrap h2 {
+	margin-top: 2em;
+	font-weight: 600;
+	letter-spacing: -0.005em;
+	color: var(--is-ink);
+}
+
+.is-wrap > p.description:first-of-type { color: var(--is-muted); max-width: 70ch; }
+
+/* ------------------------------------------------------------------ */
+/* App shell: left sidebar + content pane                              */
+/* ------------------------------------------------------------------ */
+
+#wpbody-content { padding-bottom: 0; }
+
+.is-shell {
+	display: flex;
+	align-items: flex-start;
+	gap: 0;
+	margin: 8px 20px 0 0;
+	background: var(--is-bg-page);
+	border-radius: var(--is-radius-lg);
+	overflow: hidden;
+	border: 1px solid var(--is-border);
+	box-shadow: var(--is-shadow-md);
+	min-height: calc(100vh - 140px);
+	font-family: var(--is-font);
+}
+
+.is-shell-nav {
+	flex: 0 0 236px;
+	background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+	color: #cbd5e1;
+	padding: 20px 14px;
+	min-height: calc(100vh - 140px);
+	box-sizing: border-box;
+	position: sticky;
+	top: 32px;
+}
+
+.is-shell-brand {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 10px 20px;
+	color: #fff;
+}
+
+.is-shell-logo { font-size: 20px; color: #818cf8; }
+.is-shell-logo.dashicons { width: 20px; height: 20px; font-size: 20px; }
+
+.is-shell-title { font-weight: 700; font-size: 14px; letter-spacing: -0.01em; }
+
+.is-shell-nav-list { list-style: none; margin: 0; padding: 0; }
+
+.is-shell-nav-link {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 9px 12px;
+	margin-bottom: 2px;
+	border-radius: 8px;
+	color: #cbd5e1;
+	text-decoration: none;
+	font-size: 13px;
+	font-weight: 500;
+	transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.is-shell-nav-link .dashicons { font-size: 17px; width: 17px; height: 17px; opacity: 0.75; }
+
+.is-shell-nav-link:hover,
+.is-shell-nav-link:focus {
+	background: rgba(255, 255, 255, 0.07);
+	color: #fff;
+}
+
+.is-shell-nav-link.is-active {
+	background: var(--is-blue);
+	color: #fff;
+	box-shadow: 0 2px 8px rgba(79, 70, 229, 0.45);
+}
+
+.is-shell-nav-link.is-active .dashicons { opacity: 1; }
+
+.is-shell-version {
+	margin-top: 18px;
+	padding: 10px 12px 0;
+	border-top: 1px solid rgba(255, 255, 255, 0.08);
+	color: #64748b;
+	font-size: 11px;
+}
+
+.is-shell-content {
+	flex: 1;
+	min-width: 0;
+	background: var(--is-bg-page);
+	padding: 28px 32px 40px;
+	box-sizing: border-box;
+}
+
+.is-shell-content .is-wrap { max-width: 100%; margin: 0; }
 
 /* ------------------------------------------------------------------ */
 /* Severity cards (Dashboard)                                          */
@@ -194,6 +310,38 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* Buttons: rebrand WP's default admin blue to this plugin's indigo    */
+/* accent inside the shell only -- everywhere else in wp-admin keeps   */
+/* WP's own button styling untouched.                                  */
+/* ------------------------------------------------------------------ */
+
+.is-shell-content .button-primary {
+	background: var(--is-blue);
+	border-color: var(--is-blue-dark);
+	box-shadow: none;
+	border-radius: 8px;
+}
+
+.is-shell-content .button-primary:hover,
+.is-shell-content .button-primary:focus {
+	background: var(--is-blue-dark);
+	border-color: var(--is-blue-dark);
+}
+
+.is-shell-content .button,
+.is-shell-content .button-secondary {
+	border-radius: 8px;
+}
+
+.is-shell-content table.widefat,
+.is-shell-content table.form-table {
+	background: var(--is-bg-card);
+	border-radius: var(--is-radius);
+}
+
+.is-shell-content table.widefat { border: 1px solid var(--is-border); }
+
+/* ------------------------------------------------------------------ */
 /* Responsive: same breakpoint WP admin itself collapses the menu at,  */
 /* so this lines up with behavior admins already expect.               */
 /* ------------------------------------------------------------------ */
@@ -224,6 +372,40 @@
 	}
 
 	.is-modal-content { padding: 16px; }
+
+	/* The shell itself: sidebar becomes a horizontal scrolling tab strip
+	   above the content instead of a fixed-width side column, so it
+	   never eats into the (already limited) width available on a phone. */
+	.is-shell {
+		flex-direction: column;
+		margin-right: 12px;
+		min-height: 0;
+	}
+
+	.is-shell-nav {
+		flex: none;
+		width: 100%;
+		min-height: 0;
+		position: static;
+		padding: 12px;
+		box-sizing: border-box;
+	}
+
+	.is-shell-nav-list {
+		display: flex;
+		gap: 4px;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		padding-bottom: 2px;
+	}
+
+	.is-shell-nav-list li { flex: none; }
+
+	.is-shell-nav-link { white-space: nowrap; }
+
+	.is-shell-version { display: none; }
+
+	.is-shell-content { padding: 20px 16px 32px; }
 }
 
 @media screen and (max-width: 480px) {

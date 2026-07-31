@@ -57,3 +57,5 @@ require_once dirname( __DIR__ ) . '/includes/class-is-upload-guard.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-db.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-hotlink.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-bot-block.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-rest-api.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-rest-posts.php';

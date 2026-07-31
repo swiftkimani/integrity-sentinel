@@ -43,6 +43,7 @@ class IS_Admin {
 		add_submenu_page( 'integrity-sentinel', __( 'Hardening', 'integrity-sentinel' ), __( 'Hardening', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-hardening', array( $this, 'render_hardening' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Access Control', 'integrity-sentinel' ), __( 'Access Control', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-access', array( $this, 'render_access_control' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Login Security', 'integrity-sentinel' ), __( 'Login Security', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-login', array( $this, 'render_login_security' ) );
+		add_submenu_page( 'integrity-sentinel', __( 'REST API', 'integrity-sentinel' ), __( 'REST API', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-rest', array( $this, 'render_rest_api' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Audit Log', 'integrity-sentinel' ), __( 'Audit Log', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-audit', array( $this, 'render_audit_log' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Settings', 'integrity-sentinel' ), __( 'Settings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-settings', array( $this, 'render_settings' ) );
 	}
@@ -127,6 +128,63 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_bot_block_settings' ),
 			)
 		);
+		register_setting(
+			'is_rest_api_settings_group',
+			'is_rest_api_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_rest_api_settings' ),
+			)
+		);
+		register_setting(
+			'is_rest_posts_settings_group',
+			'is_rest_posts_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_rest_posts_settings' ),
+			)
+		);
+	}
+
+	public function sanitize_rest_api_settings( $input ) {
+		$old = IS_Rest_API::settings();
+		$out = array(
+			'block_user_enumeration'   => empty( $input['block_user_enumeration'] ) ? 0 : 1,
+			'restrict_unauthenticated' => empty( $input['restrict_unauthenticated'] ) ? 0 : 1,
+			'allowed_routes'           => sanitize_textarea_field( $input['allowed_routes'] ?? '' ),
+		);
+
+		$changed = array();
+		foreach ( $out as $key => $value ) {
+			if ( (string) ( $old[ $key ] ?? '' ) !== (string) $value ) {
+				$changed[] = $key;
+			}
+		}
+		if ( $changed ) {
+			IS_Audit_Log::record( 'rest_api_settings_changed', array( 'keys' => $changed ) );
+		}
+
+		return $out;
+	}
+
+	public function sanitize_rest_posts_settings( $input ) {
+		$old = IS_Rest_Posts::settings();
+		$out = array(
+			'enabled'    => empty( $input['enabled'] ) ? 0 : 1,
+			'rate_limit' => max( 1, min( 1000, (int) ( $input['rate_limit'] ?? 30 ) ) ),
+		);
+
+		$changed = array();
+		foreach ( $out as $key => $value ) {
+			if ( (string) ( $old[ $key ] ?? '' ) !== (string) $value ) {
+				$changed[] = $key;
+			}
+		}
+		if ( $changed ) {
+			IS_Audit_Log::record( 'rest_posts_settings_changed', array( 'keys' => $changed ) );
+		}
+
+		return $out;
 	}
 
 	public function sanitize_hotlink_settings( $input ) {
@@ -1097,6 +1155,85 @@ class IS_Admin {
 					</tr>
 				</table>
 				<?php submit_button( __( 'Save rate limiting settings', 'integrity-sentinel' ) ); ?>
+			</form>
+		</div>
+		<?php
+	}
+
+	// -----------------------------------------------------------------
+	// REST API
+	// -----------------------------------------------------------------
+
+	public function render_rest_api() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$api      = IS_Rest_API::settings();
+		$posts    = IS_Rest_Posts::settings();
+		$endpoint = rest_url( 'integrity-sentinel/v1/posts' );
+		?>
+		<div class="wrap is-wrap">
+			<h1><?php esc_html_e( 'REST API', 'integrity-sentinel' ); ?></h1>
+
+			<h2><?php esc_html_e( 'Restriction', 'integrity-sentinel' ); ?></h2>
+			<form method="post" action="options.php">
+				<?php settings_fields( 'is_rest_api_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Block user enumeration', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_rest_api_settings[block_user_enumeration]" value="1" <?php checked( $api['block_user_enumeration'], 1 ); ?>>
+								<?php esc_html_e( 'Block unauthenticated access to /wp/v2/users and the old ?author=N enumeration redirect (safe for any site).', 'integrity-sentinel' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Restrict unauthenticated REST access', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_rest_api_settings[restrict_unauthenticated]" value="1" <?php checked( $api['restrict_unauthenticated'], 1 ); ?>>
+								<?php esc_html_e( 'Require authentication for every REST route except the ones listed below.', 'integrity-sentinel' ); ?>
+							</label>
+							<p class="description"><?php esc_html_e( 'Only enable this if you understand what depends on public REST access — many themes/plugins (search, forms, block-editor previews, WooCommerce\'s store API) use public REST routes and will break without being allowlisted below.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_rest_allowed_routes"><?php esc_html_e( 'Allowed route prefixes', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<textarea id="is_rest_allowed_routes" name="is_rest_api_settings[allowed_routes]" rows="4" class="large-text code"><?php echo esc_textarea( $api['allowed_routes'] ); ?></textarea>
+							<p class="description"><?php esc_html_e( 'One route prefix per line (e.g. wp/v2/oembed). Only used when restriction above is enabled. This plugin\'s own endpoint below is always allowed — it enforces its own authentication.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save REST restriction settings', 'integrity-sentinel' ) ); ?>
+			</form>
+
+			<h2><?php esc_html_e( 'Blog post publishing endpoint', 'integrity-sentinel' ); ?></h2>
+			<p class="description">
+				<?php esc_html_e( 'A dedicated endpoint for creating posts from an external tool, authenticated with WordPress\'s own Application Passwords — no separate secret store. Create one for a dedicated user (Author or Editor, not Administrator) under Users → Profile → Application Passwords, then send HTTP Basic auth with that username and application password.', 'integrity-sentinel' ); ?>
+			</p>
+			<p><strong><?php esc_html_e( 'Endpoint:', 'integrity-sentinel' ); ?></strong> <code>POST <?php echo esc_html( $endpoint ); ?></code></p>
+			<p class="description"><?php esc_html_e( 'Body (JSON): title (required), content (required), status (draft/pending/publish/private — publish/private require the publish_posts capability, otherwise it lands as pending), excerpt, categories (array of IDs), tags (array of names).', 'integrity-sentinel' ); ?></p>
+
+			<form method="post" action="options.php">
+				<?php settings_fields( 'is_rest_posts_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_rest_posts_settings[enabled]" value="1" <?php checked( $posts['enabled'], 1 ); ?>>
+								<?php esc_html_e( 'Register this endpoint.', 'integrity-sentinel' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_rest_posts_rate_limit"><?php esc_html_e( 'Rate limit (requests/hour per user)', 'integrity-sentinel' ); ?></label></th>
+						<td><input type="number" min="1" max="1000" id="is_rest_posts_rate_limit" name="is_rest_posts_settings[rate_limit]" value="<?php echo esc_attr( $posts['rate_limit'] ); ?>" class="small-text"></td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save endpoint settings', 'integrity-sentinel' ) ); ?>
 			</form>
 		</div>
 		<?php

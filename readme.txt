@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.13.0
+Stable tag: 1.14.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,26 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.14.0 =
+* New: Quarantine screen — a human-in-the-loop quarantine engine, the
+  same principle Wordfence itself uses under the hood: suspend, never
+  destroy. A flagged file is moved (not copied, not deleted) into a
+  locked-down directory outside its original location and stays there
+  until you explicitly restore it or permanently delete it — nothing
+  quarantines or deletes anything automatically or on a schedule.
+  Available for findings that point at genuinely extra/unexpected
+  files (heuristic hits, PHP hiding in uploads, unknown files inside
+  core/plugin directories) — deliberately NOT for modified-core or
+  modified-plugin findings, since removing those would break the site
+  rather than protect it. Permanent deletion requires an explicit
+  confirmation checkbox — the one genuinely irreversible action in the
+  whole plugin.
+* Implemented entirely in PHP — works on every host with zero setup,
+  consistent with this plugin's zero-runtime-dependency design. An
+  optional Rust-based accelerator for hashing/scanning speed on
+  capable hosts remains a possible future addition, never a
+  requirement for quarantine to work.
 
 = 1.13.0 =
 * New: configurable automatic scan frequency (hourly, twice daily,

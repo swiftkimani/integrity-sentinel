@@ -1,7 +1,7 @@
 {
     "assets/css/is-admin.css": "3673e802a04c77ee4a7986c5b67a3522502de23250005940c4c44311bff85d29",
     "assets/js/is-admin.js": "fb675c89a6d414d8162c681575b191623e711dc6d9029a945a9ad5a106fe64be",
-    "includes/class-is-admin.php": "110f79339843e1544e7fc71e6a0017f90a3d1913abb0e3a19b30bb71235b1edb",
+    "includes/class-is-admin.php": "d85a783217b6a69fd18532551f08e3a38e409da3d32b6d54040b7a523849806d",
     "includes/class-is-ajax.php": "6eb4d0157ec226187d02fea4098c3afd9a189ec834acf529c72169069e4bf496",
     "includes/class-is-audit-log.php": "26a043fab8f92c25e905f7404b5d1d7f8edd7251205ffa8fc6cca5de84eb14bf",
     "includes/class-is-cli.php": "f5a4d4e77fb940f245ab2e644b9cce0ca30a003aa96f2a416c0cfe8f6c7096d2",
@@ -13,10 +13,11 @@
     "includes/class-is-hardening.php": "e4682b0996dbe32c36f2be2e1fa1393d5d48062389d9ecdb6549b8cf733a8391",
     "includes/class-is-headers.php": "7abc2771312bff8562ef846a6c895758fad02cd2c306457efc16f3235e635c9a",
     "includes/class-is-heuristics.php": "c2ae0f864565359a58fa75c116dcd7410730b21ff73863e24942e3c13c86d126",
+    "includes/class-is-ip-list.php": "f75780387c27143398b9b7a8f0702e25d2d8f778ae46f7f85a3292889c1bffc2",
     "includes/class-is-notifications.php": "4fe06aeedfd77272df788773fe255916a8685689cc80d782248298388fe2e972",
     "includes/class-is-plugin-checksums.php": "b2e17087084782ad087c7c5f6d79a31ccf1ac32e8a079d2713bdd22a455e8026",
     "includes/class-is-scanner.php": "bc741f5dec56b7194a07d6ce4c35bb7b487a5c061b23cb471af3962da228c8c7",
     "includes/class-is-update-monitor.php": "3af2c1a01eff230f4f35e7069a3a50a106a20a84c7bdba1982d2364074fc52ff",
-    "integrity-sentinel.php": "329f53d095f4d81b084adfe34ef24b4c667d4f7aa80a6d6aab63f0fa07f3a20e",
+    "integrity-sentinel.php": "692441de056a15a3c7ddca8a3501ad5fcbabd8f51aa8878629e7620c0513baca",
     "uninstall.php": "31fd5d17ba898b944761a5c33c8a7c60336f412c87860d08d40bbe0a2950e6b3"
 }

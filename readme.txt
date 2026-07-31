@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.4.0
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,17 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.5.0 =
+* New: Access Control screen — editable, CIDR-aware IP whitelist and
+  blacklist (IPv4 and IPv6). Blacklisted visitors get a 403 before most
+  of WordPress loads; the whitelist always wins over the blacklist, and
+  the admin saving the page always has their own current IP kept in the
+  whitelist automatically, so a blacklist mistake can't lock them out.
+* New: optional reverse-proxy/CDN support for the above — a forwarded-IP
+  header (X-Forwarded-For, CF-Connecting-IP, X-Real-IP) is trusted only
+  when the direct connection itself comes from an explicitly configured
+  trusted proxy range, so it can't be spoofed by a direct attacker.
 
 = 1.4.0 =
 * New: HTTP hardening bundle on the Hardening screen — security headers

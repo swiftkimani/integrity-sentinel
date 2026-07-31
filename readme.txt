@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.8.0
+Stable tag: 1.9.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,16 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.9.0 =
+* New: five additional obfuscation-detection heuristics — a function
+  name built from concatenated chr() calls, a variable-variable used
+  as a function call, a flood of \xHH hex-escape sequences, a
+  dangerous function name spelled via concatenated string literals
+  (e.g. two short fragments joined by a dot), and a charset-independent
+  entropy check that flags long, high-randomness string literals even
+  when they aren't base64 (catching hex/XOR/custom-encoded payloads
+  the existing base64-charset check would miss).
 
 = 1.8.0 =
 * Fix: "Ignore" on a finding is now durable — an ignored finding no

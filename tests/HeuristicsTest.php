@@ -141,6 +141,90 @@ class HeuristicsTest extends TestCase {
 		$this->assertStringStartsNotWith( ' ', $snippet );
 	}
 
+	public function test_detects_chr_concat_function_build() {
+		$content = '<?php $f = ' . 'chr(101).chr(118).chr(97).chr(108); $f($x);';
+		$hit     = $this->find_rule( $this->scan( $content ), 'chr_concat_function_build' );
+		$this->assertNotNull( $hit );
+		$this->assertSame( 'high', $hit['severity'] );
+	}
+
+	public function test_does_not_flag_a_single_chr_call() {
+		$content = '<?php echo ' . 'chr(65);';
+		$this->assertNull( $this->find_rule( $this->scan( $content ), 'chr_concat_function_build' ) );
+	}
+
+	public function test_detects_variable_variable_call() {
+		$content = '<?php $' . '$name();';
+		$this->assertNotNull( $this->find_rule( $this->scan( $content ), 'variable_variable_call' ) );
+	}
+
+	public function test_detects_hex_escape_flood() {
+		$content = '<?php $x = "' . str_repeat( '\x41', 25 ) . '";';
+		$hit     = $this->find_rule( $this->scan( $content ), 'hex_escape_flood' );
+		$this->assertNotNull( $hit );
+		$this->assertSame( 'high', $hit['severity'] );
+	}
+
+	public function test_does_not_flag_a_couple_of_hex_escapes() {
+		$content = '<?php $x = "' . str_repeat( '\x41', 3 ) . '";';
+		$this->assertNull( $this->find_rule( $this->scan( $content ), 'hex_escape_flood' ) );
+	}
+
+	public function test_detects_concatenated_dangerous_function_name() {
+		$content = '<?php $f = "ev" . "al"; $f($x);';
+		$hit     = $this->find_rule( $this->scan( $content ), 'concatenated_dangerous_function_name' );
+		$this->assertNotNull( $hit );
+		$this->assertSame( 'high', $hit['severity'] );
+		$this->assertStringContainsString( 'eval', $hit['label'] );
+	}
+
+	public function test_does_not_flag_concatenation_of_harmless_words() {
+		$content = '<?php $s = "hello" . "world";';
+		$this->assertNull( $this->find_rule( $this->scan( $content ), 'concatenated_dangerous_function_name' ) );
+	}
+
+	public function test_find_concatenated_dangerous_function_name_is_pure_and_direct() {
+		$this->assertNull( IS_Heuristics::find_concatenated_dangerous_function_name( '$s = "hello" . "world";' ) );
+		$result = IS_Heuristics::find_concatenated_dangerous_function_name( '$f = "sys" . "tem";' );
+		$this->assertSame( 'system', $result['name'] );
+	}
+
+	public function test_detects_high_entropy_string_blob() {
+		// Deterministic pseudo-random-looking bytes, well above the
+		// entropy threshold and the minimum length -- not base64
+		// charset-restricted, unlike long_base64_blob's sample.
+		$chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=';
+		$blob  = '';
+		for ( $i = 0; $i < 250; $i++ ) {
+			$blob .= $chars[ ( $i * 37 + 11 ) % strlen( $chars ) ];
+		}
+		$content = '<?php $x = "' . $blob . '";';
+		$hit     = $this->find_rule( $this->scan( $content ), 'high_entropy_string_blob' );
+		$this->assertNotNull( $hit );
+		$this->assertSame( 'medium', $hit['severity'] );
+	}
+
+	public function test_low_entropy_repeated_string_is_not_flagged() {
+		$content = '<?php $x = "' . str_repeat( 'a', 300 ) . '";';
+		$this->assertNull( $this->find_rule( $this->scan( $content ), 'high_entropy_string_blob' ) );
+	}
+
+	public function test_short_string_is_not_flagged_regardless_of_entropy() {
+		$this->assertSame( array(), IS_Heuristics::find_high_entropy_blobs( '$x = "' . str_repeat( 'aB3!', 20 ) . '";' ) );
+	}
+
+	public function test_shannon_entropy_of_empty_string_is_zero() {
+		$this->assertSame( 0.0, IS_Heuristics::shannon_entropy( '' ) );
+	}
+
+	public function test_shannon_entropy_of_single_repeated_char_is_zero() {
+		$this->assertSame( 0.0, IS_Heuristics::shannon_entropy( str_repeat( 'a', 100 ) ) );
+	}
+
+	public function test_shannon_entropy_of_varied_bytes_is_positive() {
+		$this->assertGreaterThan( 0.0, IS_Heuristics::shannon_entropy( 'abcdefghijklmnop' ) );
+	}
+
 	public function test_every_rule_has_valid_shape() {
 		foreach ( IS_Heuristics::rules() as $rule ) {
 			$this->assertNotEmpty( $rule['id'] );

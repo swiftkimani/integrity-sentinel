@@ -121,6 +121,27 @@ class IS_Heuristics {
 				) . ')/i',
 			),
 			array(
+				'id'       => 'chr_concat_function_build',
+				'label'    => __( 'A string built by concatenating multiple chr() calls — a classic technique for spelling out a dangerous function name (e.g. "eval") so it does not appear as readable text.', 'integrity-sentinel' ),
+				'severity' => 'high',
+				'pattern'  => '/(?:chr\s*\(\s*\d+\s*\)\s*\.\s*){2,}chr\s*\(\s*\d+\s*\)/i',
+			),
+			array(
+				'id'       => 'variable_variable_call',
+				// Label intentionally spells out the syntax in words
+				// rather than writing it literally, so this rule's own
+				// label can never accidentally match its own pattern.
+				'label'    => __( 'A variable-variable used as a function call (dollar-dollar-name, or curly-brace form) — hides which function is actually being invoked from a simple text search. Occasionally legitimate in advanced dynamic-dispatch code, so review the context.', 'integrity-sentinel' ),
+				'severity' => 'medium',
+				'pattern'  => '/\$\{?\$\w+\}?\s*\(/',
+			),
+			array(
+				'id'       => 'hex_escape_flood',
+				'label'    => __( 'A long run of hex-escape sequences in a string literal — a common way to hex-encode an entire payload so it never appears as readable code.', 'integrity-sentinel' ),
+				'severity' => 'high',
+				'pattern'  => '/(?:\\\\x[0-9a-fA-F]{2}){20,}/',
+			),
+			array(
 				'id'       => 'ffi_or_dl_call',
 				// Label deliberately writes "the dl function" WITHOUT the
 				// usual parentheses after the name: the parenthesized form
@@ -175,6 +196,136 @@ class IS_Heuristics {
 			);
 		}
 
+		foreach ( self::custom_checks( $content ) as $hit ) {
+			$rules_out[] = $hit;
+		}
+
 		return $rules_out;
+	}
+
+	// -------------------------------------------------------------------
+	// Checks that can't be expressed as a single regex pattern
+	// -------------------------------------------------------------------
+
+	const DANGEROUS_CONCAT_FUNCTION_NAMES = array( 'eval', 'assert', 'system', 'exec', 'passthru', 'shell_exec', 'popen', 'proc_open', 'create_function' );
+	const HIGH_ENTROPY_MIN_LENGTH         = 200;
+	const HIGH_ENTROPY_THRESHOLD          = 4.8; // bits/byte, out of a max of 8.0 -- natural text/code sits well under this
+
+	/**
+	 * Spots a dangerous function name spelled via adjacent
+	 * string-literal concatenation (not shown as a literal example
+	 * here on purpose -- see find_concatenated_dangerous_function_name()),
+	 * and long string literals whose byte-level entropy is high enough
+	 * to suggest packed/encoded content -- charset-independent, so it
+	 * catches hex/XOR/custom encodings that long_base64_blob's
+	 * base64-charset pattern would miss.
+	 *
+	 * @return array<array{rule_id:string,label:string,severity:string,matches:array}>
+	 */
+	private static function custom_checks( $content ) {
+		$out = array();
+
+		$concat_hit = self::find_concatenated_dangerous_function_name( $content );
+		if ( null !== $concat_hit ) {
+			$out[] = array(
+				'rule_id'  => 'concatenated_dangerous_function_name',
+				'label'    => sprintf(
+					/* translators: %s: the reconstructed function name */
+					__( 'A dangerous function name ("%s") appears to be built by concatenating short string literals — a common way to hide a call to it from simple text search.', 'integrity-sentinel' ),
+					$concat_hit['name']
+				),
+				'severity' => 'high',
+				'matches'  => array( self::line_context( $content, $concat_hit['offset'] ) ),
+			);
+		}
+
+		foreach ( self::find_high_entropy_blobs( $content ) as $blob ) {
+			$out[] = array(
+				'rule_id'  => 'high_entropy_string_blob',
+				'label'    => __( 'A long string literal with unusually high byte-level randomness for readable text or code — consistent with a packed, encrypted, or custom-encoded payload. Worth a quick look, not a confirmed problem on its own.', 'integrity-sentinel' ),
+				'severity' => 'medium',
+				'matches'  => array( self::line_context( $content, $blob['offset'] ) ),
+			);
+		}
+
+		return $out;
+	}
+
+	private static function line_context( $content, $offset ) {
+		$line_no = substr_count( substr( $content, 0, $offset ), "\n" ) + 1;
+		$lines   = explode( "\n", $content );
+		$snippet = isset( $lines[ $line_no - 1 ] ) ? trim( $lines[ $line_no - 1 ] ) : '';
+		return array(
+			'line'    => $line_no,
+			'snippet' => mb_substr( $snippet, 0, 200 ),
+		);
+	}
+
+	/**
+	 * Pure: finds two adjacent quoted string literals joined by a dot
+	 * whose concatenation spells one of a curated set of dangerous
+	 * function names (deliberately not shown as a literal example here,
+	 * so this docblock can never accidentally match its own rule).
+	 * Letters/underscore only per segment (no digits), which is also
+	 * exactly why this can't accidentally match this file's own
+	 * known_webshell_marker concatenations -- those segments contain
+	 * digits or regex metacharacters, not plain letters.
+	 *
+	 * @return array{name:string,offset:int}|null
+	 */
+	public static function find_concatenated_dangerous_function_name( $content ) {
+		if ( ! preg_match_all( '/[\'"]([A-Za-z_]{1,14})[\'"]\s*\.\s*[\'"]([A-Za-z_]{1,14})[\'"]/', $content, $m, PREG_OFFSET_CAPTURE ) ) {
+			return null;
+		}
+		foreach ( $m[0] as $i => $whole ) {
+			$joined = strtolower( $m[1][ $i ][0] . $m[2][ $i ][0] );
+			if ( in_array( $joined, self::DANGEROUS_CONCAT_FUNCTION_NAMES, true ) ) {
+				return array(
+					'name'   => $joined,
+					'offset' => $whole[1],
+				);
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Pure: Shannon entropy in bits per byte. Natural text and typical
+	 * source code sit well under 4.5; base64/hex/binary-packed data
+	 * commonly sits at 4.8+.
+	 */
+	public static function shannon_entropy( $string ) {
+		$len = strlen( $string );
+		if ( 0 === $len ) {
+			return 0.0;
+		}
+		$entropy = 0.0;
+		foreach ( count_chars( $string, 1 ) as $count ) {
+			$p        = $count / $len;
+			$entropy -= $p * log( $p, 2 );
+		}
+		return $entropy;
+	}
+
+	/**
+	 * Pure: long quoted string literals whose entropy exceeds the
+	 * threshold, capped the same way rule matches are.
+	 *
+	 * @return array<array{offset:int}>
+	 */
+	public static function find_high_entropy_blobs( $content ) {
+		if ( ! preg_match_all( '/[\'"]([^\'"\n]{' . self::HIGH_ENTROPY_MIN_LENGTH . ',})[\'"]/', $content, $m, PREG_OFFSET_CAPTURE ) ) {
+			return array();
+		}
+		$out = array();
+		foreach ( $m[1] as $match ) {
+			if ( self::shannon_entropy( $match[0] ) >= self::HIGH_ENTROPY_THRESHOLD ) {
+				$out[] = array( 'offset' => $match[1] );
+				if ( count( $out ) >= self::MAX_MATCHES_PER_RULE ) {
+					break;
+				}
+			}
+		}
+		return $out;
 	}
 }

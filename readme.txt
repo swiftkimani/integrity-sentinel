@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.5.0
+Stable tag: 1.6.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,17 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.6.0 =
+* New: Login Security screen with two independent, off-by-default-safe
+  features:
+  * Login URL rename — hides wp-login.php behind a custom slug of your
+    choice. Off by default (blank slug = stock behavior unchanged).
+    Covered by the IS_SAFE_MODE kill switch if it ever needs a fast
+    undo.
+  * Login rate limiting — locks an IP out of authentication after
+    repeated failed logins (default: 5 within 15 minutes, 15-minute
+    lockout). Whitelisted IPs (Access Control) always bypass it.
 
 = 1.5.0 =
 * New: Access Control screen — editable, CIDR-aware IP whitelist and

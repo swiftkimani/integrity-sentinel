@@ -21,6 +21,7 @@ class IS_Admin {
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue' ) );
 		add_action( 'admin_post_is_apply_uploads_block', array( $this, 'handle_apply_uploads_block' ) );
 		add_action( 'admin_post_is_remove_uploads_block', array( $this, 'handle_remove_uploads_block' ) );
+		add_action( 'admin_post_is_reset_module_health', array( $this, 'handle_reset_module_health' ) );
 	}
 
 	public function add_menu() {
@@ -143,6 +144,22 @@ class IS_Admin {
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	public function handle_reset_module_health() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
+		}
+		check_admin_referer( 'is_reset_module_health' );
+
+		$module = isset( $_POST['module'] ) ? sanitize_key( wp_unslash( $_POST['module'] ) ) : '';
+		if ( $module ) {
+			IS_Guard::reset( $module );
+			IS_Audit_Log::record( 'module_health_reset', array( 'module' => $module ) );
+		}
+
+		wp_safe_redirect( admin_url( 'admin.php?page=integrity-sentinel' ) );
+		exit;
+	}
+
 	private function guard_hardening_action() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -235,7 +252,78 @@ class IS_Admin {
 			<p class="description">
 				<?php esc_html_e( "This is a file-integrity and pattern scanner, not a full security suite: it doesn't include a firewall, login-attack protection, or a global threat-intelligence feed. It's built to answer one question well: \"is there anything on this site that shouldn't be here?\"", 'integrity-sentinel' ); ?>
 			</p>
+
+			<?php $this->render_feature_health(); ?>
 		</div>
+		<?php
+	}
+
+	// -----------------------------------------------------------------
+	// Feature health
+	// -----------------------------------------------------------------
+
+	/**
+	 * Every hardening/detection module runs under IS_Guard, which pauses
+	 * a module (rather than letting it fatal the site) if it keeps
+	 * throwing. This panel surfaces that state so a paused module isn't
+	 * silently invisible -- and it always shows the IS_SAFE_MODE kill
+	 * switch, since that's the thing a locked-out admin needs to find in
+	 * a hurry.
+	 */
+	private function render_feature_health() {
+		$health = IS_Guard::all_health();
+		?>
+		<h2><?php esc_html_e( 'Feature health', 'integrity-sentinel' ); ?></h2>
+
+		<?php if ( IS_Guard::is_safe_mode() ) : ?>
+			<div class="notice notice-warning inline">
+				<p>
+					<strong><?php esc_html_e( 'Safe mode is active.', 'integrity-sentinel' ); ?></strong>
+					<?php esc_html_e( 'IS_SAFE_MODE is defined truthy in wp-config.php, so every hardening module is currently paused. Remove that constant to resume normal protection.', 'integrity-sentinel' ); ?>
+				</p>
+			</div>
+		<?php endif; ?>
+
+		<?php if ( empty( $health ) ) : ?>
+			<p class="description"><?php esc_html_e( 'All modules healthy. No hardening module has hit a fault.', 'integrity-sentinel' ); ?></p>
+		<?php else : ?>
+			<table class="widefat striped" style="max-width:800px;">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'Module', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Status', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Last error', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Action', 'integrity-sentinel' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( $health as $module => $state ) : ?>
+						<?php $disabled = IS_Guard::is_disabled( $state, time() ); ?>
+						<tr>
+							<td><code><?php echo esc_html( $module ); ?></code></td>
+							<td>
+								<?php if ( $disabled ) : ?>
+									<span class="is-badge is-badge-high"><?php esc_html_e( 'Paused', 'integrity-sentinel' ); ?></span>
+								<?php elseif ( 'degraded' === $state['status'] ) : ?>
+									<span class="is-badge is-badge-medium"><?php esc_html_e( 'Degraded', 'integrity-sentinel' ); ?></span>
+								<?php else : ?>
+									<span class="is-badge is-badge-low"><?php esc_html_e( 'OK', 'integrity-sentinel' ); ?></span>
+								<?php endif; ?>
+							</td>
+							<td><?php echo esc_html( $state['last_error'] ? $state['last_error'] : '—' ); ?></td>
+							<td>
+								<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+									<?php wp_nonce_field( 'is_reset_module_health' ); ?>
+									<input type="hidden" name="action" value="is_reset_module_health">
+									<input type="hidden" name="module" value="<?php echo esc_attr( $module ); ?>">
+									<?php submit_button( __( 'Reset', 'integrity-sentinel' ), 'secondary small', 'submit', false ); ?>
+								</form>
+							</td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+		<?php endif; ?>
 		<?php
 	}
 

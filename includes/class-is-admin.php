@@ -137,7 +137,13 @@ class IS_Admin {
 
 		$out = array( 'login_slug' => $slug );
 		if ( (string) $old['login_slug'] !== (string) $out['login_slug'] ) {
-			IS_Audit_Log::record( 'login_slug_changed', array( 'from' => $old['login_slug'], 'to' => $out['login_slug'] ) );
+			IS_Audit_Log::record(
+				'login_slug_changed',
+				array(
+					'from' => $old['login_slug'],
+					'to'   => $out['login_slug'],
+				)
+			);
 		}
 
 		return $out;
@@ -220,7 +226,7 @@ class IS_Admin {
 	public function sanitize_settings( $input ) {
 		$old = get_option( 'is_scan_settings', array() );
 
-		$out = array();
+		$out                         = array();
 		$out['batch_size']           = max( 5, min( 200, (int) ( $input['batch_size'] ?? 40 ) ) );
 		$out['alert_email']          = is_email( $input['alert_email'] ?? '' ) ? sanitize_email( $input['alert_email'] ) : get_option( 'admin_email' );
 		$out['alert_on_severity']    = in_array( $input['alert_on_severity'] ?? '', array( 'critical', 'high', 'medium', 'low' ), true ) ? $input['alert_on_severity'] : 'high';
@@ -352,9 +358,9 @@ class IS_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$db     = IS_DB::instance();
-		$latest = $db->get_latest_run();
-		$counts = $db->severity_counts( 'new' );
+		$db      = IS_DB::instance();
+		$latest  = $db->get_latest_run();
+		$counts  = $db->severity_counts( 'new' );
 		$running = $db->get_running_run();
 		?>
 		<div class="wrap is-wrap">
@@ -518,11 +524,17 @@ class IS_Admin {
 		);
 
 		$findings = $db->get_findings( $args );
-		$total    = $db->count_findings( array( 'status' => $args['status'], 'severity' => $severity ) );
+		$total    = $db->count_findings(
+			array(
+				'status'   => $args['status'],
+				'severity' => $severity,
+			)
+		);
 		$pages    = max( 1, (int) ceil( $total / $per_page ) );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Findings', 'integrity-sentinel' ); ?></h1>
+			<p class="description"><?php esc_html_e( 'Ignoring a finding stays durable: it won\'t reappear on later scans as long as the file\'s content is unchanged. If the file actually changes afterward, it\'s flagged again as new — an old "ignore" never silently covers different content.', 'integrity-sentinel' ); ?></p>
 
 			<ul class="subsubsub">
 				<?php
@@ -533,10 +545,16 @@ class IS_Admin {
 					'resolved'     => __( 'Resolved', 'integrity-sentinel' ),
 					'all'          => __( 'All', 'integrity-sentinel' ),
 				);
-				$links = array();
+				$links    = array();
 				foreach ( $statuses as $key => $label ) {
-					$url    = add_query_arg( array( 'page' => 'integrity-sentinel-findings', 'status' => $key ), admin_url( 'admin.php' ) );
-					$class  = ( $status === $key ) ? 'current' : '';
+					$url     = add_query_arg(
+						array(
+							'page'   => 'integrity-sentinel-findings',
+							'status' => $key,
+						),
+						admin_url( 'admin.php' )
+					);
+					$class   = ( $status === $key ) ? 'current' : '';
 					$links[] = sprintf( '<a href="%s" class="%s">%s</a>', esc_url( $url ), esc_attr( $class ), esc_html( $label ) );
 				}
 				echo wp_kses_post( implode( ' | ', $links ) );
@@ -587,7 +605,15 @@ class IS_Admin {
 				<div class="tablenav"><div class="tablenav-pages">
 					<?php
 					for ( $p = 1; $p <= $pages; $p++ ) {
-						$url = add_query_arg( array( 'page' => 'integrity-sentinel-findings', 'status' => $status, 'severity' => $severity, 'paged' => $p ), admin_url( 'admin.php' ) );
+						$url = add_query_arg(
+							array(
+								'page'     => 'integrity-sentinel-findings',
+								'status'   => $status,
+								'severity' => $severity,
+								'paged'    => $p,
+							),
+							admin_url( 'admin.php' )
+						);
 						printf( '<a class="%s" href="%s">%d</a> ', $p === $paged ? 'current' : '', esc_url( $url ), (int) $p ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 					}
 					?>
@@ -792,8 +818,8 @@ class IS_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$settings  = IS_IP_List::settings();
-		$your_ip   = IS_IP_List::client_ip();
+		$settings = IS_IP_List::settings();
+		$your_ip  = IS_IP_List::client_ip();
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Access Control', 'integrity-sentinel' ); ?></h1>
@@ -975,7 +1001,13 @@ class IS_Admin {
 				<div class="tablenav"><div class="tablenav-pages">
 					<?php
 					for ( $p = 1; $p <= $pages; $p++ ) {
-						$url = add_query_arg( array( 'page' => 'integrity-sentinel-audit', 'paged' => $p ), admin_url( 'admin.php' ) );
+						$url = add_query_arg(
+							array(
+								'page'  => 'integrity-sentinel-audit',
+								'paged' => $p,
+							),
+							admin_url( 'admin.php' )
+						);
 						printf( '<a class="%s" href="%s">%d</a> ', $p === $paged ? 'current' : '', esc_url( $url ), (int) $p ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 					}
 					?>

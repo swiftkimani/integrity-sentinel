@@ -4,7 +4,7 @@ Tags: security, malware, scanner, file integrity, checksums
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.9.0
+Stable tag: 1.10.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,6 +158,20 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.10.0 =
+* New: hotlink protection (Hardening screen) — writes a marker-delimited
+  .htaccess rule block denying cross-site embedding of images from
+  wp-content/uploads, with an editable allowed-domains list (your own
+  domain is always allowed automatically) and an nginx snippet for
+  manual setup. Direct access and no-referer requests (feed readers,
+  social-share previews) always still work.
+* New: AI-crawler/scraper bot blocking (Access Control screen) — a
+  curated, editable list of AI-training crawlers and scrapers (GPTBot,
+  ClaudeBot, CCBot, Bytespider, and others) is blocked with a 403, and
+  the same names are added as Disallow entries in robots.txt for the
+  crawlers that honor it. Enabled by default — blocking known bot user
+  agents carries no risk to human visitors.
 
 = 1.9.0 =
 * New: five additional obfuscation-detection heuristics — a function

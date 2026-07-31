@@ -37,6 +37,7 @@ class IS_Admin {
 		add_submenu_page( 'integrity-sentinel', __( 'Dashboard', 'integrity-sentinel' ), __( 'Dashboard', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel', array( $this, 'render_dashboard' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Findings', 'integrity-sentinel' ), __( 'Findings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-findings', array( $this, 'render_findings' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Hardening', 'integrity-sentinel' ), __( 'Hardening', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-hardening', array( $this, 'render_hardening' ) );
+		add_submenu_page( 'integrity-sentinel', __( 'Access Control', 'integrity-sentinel' ), __( 'Access Control', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-access', array( $this, 'render_access_control' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Audit Log', 'integrity-sentinel' ), __( 'Audit Log', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-audit', array( $this, 'render_audit_log' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Settings', 'integrity-sentinel' ), __( 'Settings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-settings', array( $this, 'render_settings' ) );
 	}
@@ -81,6 +82,46 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_hardening_settings' ),
 			)
 		);
+		register_setting(
+			'is_ip_list_settings_group',
+			'is_ip_list_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_ip_list_settings' ),
+			)
+		);
+	}
+
+	public function sanitize_ip_list_settings( $input ) {
+		$old = IS_IP_List::settings();
+
+		$out = array(
+			'whitelist'            => sanitize_textarea_field( $input['whitelist'] ?? '' ),
+			'blacklist'            => sanitize_textarea_field( $input['blacklist'] ?? '' ),
+			'trusted_proxy_ranges' => sanitize_textarea_field( $input['trusted_proxy_ranges'] ?? '' ),
+			'trusted_ip_header'    => in_array( $input['trusted_ip_header'] ?? '', array( '', 'X-Forwarded-For', 'CF-Connecting-IP', 'X-Real-IP' ), true )
+				? $input['trusted_ip_header']
+				: '',
+		);
+
+		// Never let a whitelist edit lock the acting admin out: their own
+		// current IP is guaranteed present in the saved whitelist.
+		$acting_ip = IS_IP_List::client_ip();
+		if ( '' !== $acting_ip && ! IS_IP_List::ip_matches_list( $acting_ip, IS_IP_List::parse_list_text( $out['whitelist'] ) ) ) {
+			$out['whitelist'] = trim( $out['whitelist'] . "\n" . $acting_ip . ' # auto-added: the admin who saved this page' );
+		}
+
+		$changed = array();
+		foreach ( $out as $key => $value ) {
+			if ( (string) ( $old[ $key ] ?? '' ) !== (string) $value ) {
+				$changed[] = $key;
+			}
+		}
+		if ( $changed ) {
+			IS_Audit_Log::record( 'ip_list_settings_changed', array( 'keys' => $changed ) );
+		}
+
+		return $out;
 	}
 
 	public function sanitize_hardening_settings( $input ) {
@@ -585,6 +626,78 @@ class IS_Admin {
 			</table>
 			<?php submit_button( __( 'Save HTTP hardening settings', 'integrity-sentinel' ) ); ?>
 		</form>
+		<?php
+	}
+
+	// -----------------------------------------------------------------
+	// Access control (IP allow/deny lists)
+	// -----------------------------------------------------------------
+
+	public function render_access_control() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$settings  = IS_IP_List::settings();
+		$your_ip   = IS_IP_List::client_ip();
+		?>
+		<div class="wrap is-wrap">
+			<h1><?php esc_html_e( 'Access Control', 'integrity-sentinel' ); ?></h1>
+			<p class="description">
+				<?php
+				printf(
+					/* translators: %s: the current visitor's detected IP address */
+					esc_html__( 'Your current detected IP address is %s. It is always kept in the whitelist automatically when you save this page, so a blacklist mistake here can never lock you out.', 'integrity-sentinel' ),
+					'<code>' . esc_html( $your_ip ? $your_ip : __( '(unknown)', 'integrity-sentinel' ) ) . '</code>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- the <code> wrapper is a fixed literal, the interpolated value is esc_html()'d
+				);
+				?>
+			</p>
+
+			<form method="post" action="options.php">
+				<?php settings_fields( 'is_ip_list_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="is_ip_whitelist"><?php esc_html_e( 'Whitelist', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<textarea id="is_ip_whitelist" name="is_ip_list_settings[whitelist]" rows="6" class="large-text code"><?php echo esc_textarea( $settings['whitelist'] ); ?></textarea>
+							<p class="description"><?php esc_html_e( 'One IP or CIDR range per line (e.g. 203.0.113.5 or 203.0.113.0/24). Trailing "# note" comments are allowed. Always wins over the blacklist below.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_ip_blacklist"><?php esc_html_e( 'Blacklist', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<textarea id="is_ip_blacklist" name="is_ip_list_settings[blacklist]" rows="6" class="large-text code"><?php echo esc_textarea( $settings['blacklist'] ); ?></textarea>
+							<p class="description"><?php esc_html_e( 'One IP or CIDR range per line. Matching visitors get a 403 before most of WordPress loads.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+
+				<h2><?php esc_html_e( 'Behind a reverse proxy or CDN?', 'integrity-sentinel' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'By default only the direct connecting IP (REMOTE_ADDR) is used, which is safe but will show your proxy/CDN\'s IP for every visitor if you use one. Only fill this in if you actually run behind a reverse proxy or CDN: the forwarded-IP header is trusted ONLY when the direct connection comes from an IP in the range below, so a visitor connecting directly can never forge their way past your lists with a fake header.', 'integrity-sentinel' ); ?>
+				</p>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="is_ip_header"><?php esc_html_e( 'Trusted header', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<select id="is_ip_header" name="is_ip_list_settings[trusted_ip_header]">
+								<option value="" <?php selected( $settings['trusted_ip_header'], '' ); ?>><?php esc_html_e( 'None — always use the direct connecting IP (recommended unless you use a proxy/CDN)', 'integrity-sentinel' ); ?></option>
+								<option value="X-Forwarded-For" <?php selected( $settings['trusted_ip_header'], 'X-Forwarded-For' ); ?>>X-Forwarded-For</option>
+								<option value="CF-Connecting-IP" <?php selected( $settings['trusted_ip_header'], 'CF-Connecting-IP' ); ?>>CF-Connecting-IP (Cloudflare)</option>
+								<option value="X-Real-IP" <?php selected( $settings['trusted_ip_header'], 'X-Real-IP' ); ?>>X-Real-IP</option>
+							</select>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_ip_trusted_ranges"><?php esc_html_e( 'Trusted proxy IP range(s)', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<textarea id="is_ip_trusted_ranges" name="is_ip_list_settings[trusted_proxy_ranges]" rows="3" class="large-text code"><?php echo esc_textarea( $settings['trusted_proxy_ranges'] ); ?></textarea>
+							<p class="description"><?php esc_html_e( 'One IP or CIDR range per line — your proxy/CDN\'s own IP ranges, not your visitors\'.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save access control settings', 'integrity-sentinel' ) ); ?>
+			</form>
+		</div>
 		<?php
 	}
 

@@ -73,6 +73,34 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_settings' ),
 			)
 		);
+		register_setting(
+			'is_hardening_settings_group',
+			'is_hardening_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_hardening_settings' ),
+			)
+		);
+	}
+
+	public function sanitize_hardening_settings( $input ) {
+		$old = IS_Headers::settings();
+		$out = array();
+		foreach ( array_keys( IS_Headers::default_settings() ) as $key ) {
+			$out[ $key ] = empty( $input[ $key ] ) ? 0 : 1;
+		}
+
+		$changed = array();
+		foreach ( $out as $key => $value ) {
+			if ( (string) ( $old[ $key ] ?? '' ) !== (string) $value ) {
+				$changed[] = $key;
+			}
+		}
+		if ( $changed ) {
+			IS_Audit_Log::record( 'hardening_settings_changed', array( 'keys' => $changed ) );
+		}
+
+		return $out;
 	}
 
 	public function sanitize_settings( $input ) {
@@ -483,11 +511,80 @@ class IS_Admin {
 			</p>
 			<pre><?php echo esc_html( IS_Hardening::nginx_snippet() ); ?></pre>
 
+			<?php $this->render_http_hardening_section(); ?>
+
 			<h2><?php esc_html_e( 'Hardening checks', 'integrity-sentinel' ); ?></h2>
 			<p>
 				<?php esc_html_e( 'Every scan also audits site configuration: the file editor, debug output, auth salts, world-writable paths, exposed .git/.env/debug.log files, backup archives in the webroot, administrator accounts, plugins closed on WordPress.org, and more. Results appear under Findings alongside file-integrity issues.', 'integrity-sentinel' ); ?>
 			</p>
 		</div>
+		<?php
+	}
+
+	/**
+	 * HTTP hardening toggles: security headers (incl. clickjacking),
+	 * hiding the WordPress version, and disabling XML-RPC/RSS feeds.
+	 * The first three are safe to leave on for every site; the last two
+	 * can break a real integration (Jetpack, feed subscribers), so
+	 * they're clearly marked and off by default.
+	 */
+	private function render_http_hardening_section() {
+		$settings = IS_Headers::settings();
+		?>
+		<h2><?php esc_html_e( 'HTTP hardening', 'integrity-sentinel' ); ?></h2>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_hardening_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Security headers', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_hardening_settings[security_headers]" value="1" <?php checked( $settings['security_headers'], 1 ); ?>>
+							<?php esc_html_e( 'Send X-Content-Type-Options, Referrer-Policy, and a conservative Permissions-Policy on every response (safe for any site).', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Clickjacking protection', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_hardening_settings[prevent_clickjacking]" value="1" <?php checked( $settings['prevent_clickjacking'], 1 ); ?>>
+							<?php esc_html_e( 'Send X-Frame-Options: SAMEORIGIN and a frame-ancestors CSP so the site can\'t be embedded in another site\'s iframe (safe for any site — your own iframes, e.g. the Customizer preview, stay same-origin).', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Hide WordPress version', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_hardening_settings[hide_wp_version]" value="1" <?php checked( $settings['hide_wp_version'], 1 ); ?>>
+							<?php esc_html_e( 'Remove the generator meta tag and the ?ver= query string from enqueued scripts/styles (safe for any site — this only slows down casual version fingerprinting, it is not a substitute for staying updated).', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Disable XML-RPC', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_hardening_settings[disable_xmlrpc]" value="1" <?php checked( $settings['disable_xmlrpc'], 1 ); ?>>
+							<?php esc_html_e( 'Disable every XML-RPC method (a long-standing brute-force/amplification vector).', 'integrity-sentinel' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'Only enable this if nothing on the site needs XML-RPC — Jetpack and some mobile apps/publishing tools do.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Disable RSS/Atom feeds', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_hardening_settings[disable_feeds]" value="1" <?php checked( $settings['disable_feeds'], 1 ); ?>>
+							<?php esc_html_e( 'Return 403 for every feed URL (post, comment, category, author, etc.).', 'integrity-sentinel' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'Only enable this if the site has no RSS subscribers or feed-consuming integrations.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save HTTP hardening settings', 'integrity-sentinel' ) ); ?>
+		</form>
 		<?php
 	}
 

@@ -60,9 +60,9 @@ class IS_DB {
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
 		$charset_collate = $wpdb->get_charset_collate();
-		$runs_table       = $this->runs_table();
-		$findings_table   = $this->findings_table();
-		$audit_table      = $this->audit_table();
+		$runs_table      = $this->runs_table();
+		$findings_table  = $this->findings_table();
+		$audit_table     = $this->audit_table();
 
 		$sql = "CREATE TABLE {$runs_table} (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -267,10 +267,40 @@ class IS_DB {
 	// ---------------------------------------------------------------
 
 	/**
-	 * Upsert a finding: if the same file + issue_type + rule from a
-	 * still-open problem already exists (status new/acknowledged), bump
-	 * last_seen and refresh the detail instead of creating a duplicate
-	 * row every single scan. rule_id is part of the identity so two
+	 * Pure: whether a freshly-matched finding should reuse an existing
+	 * row (update in place) rather than insert a new one. new/
+	 * acknowledged rows always refresh, as before. An ignored row also
+	 * stays reused -- and therefore stays ignored -- as long as the
+	 * file's content hasn't actually changed, which is the fix for
+	 * "Ignore" not durably suppressing: previously, an ignored finding
+	 * for an unchanged file would still spawn a brand-new 'new' row on
+	 * the very next scan, because the old matching query excluded
+	 * 'ignored' from its WHERE clause entirely. If the content HAS
+	 * changed since it was ignored, that's a legitimate reason for
+	 * fresh eyes, so a new row is correct in that case.
+	 */
+	public static function should_reuse_existing_finding( array $existing, array $incoming ) {
+		if ( ! in_array( $existing['status'] ?? '', array( 'new', 'acknowledged', 'ignored' ), true ) ) {
+			return false;
+		}
+		if ( 'ignored' !== $existing['status'] ) {
+			return true;
+		}
+
+		$existing_hash = (string) ( $existing['file_hash'] ?? '' );
+		$incoming_hash = (string) ( $incoming['file_hash'] ?? '' );
+		if ( '' === $existing_hash || '' === $incoming_hash ) {
+			return true; // no hash to compare (e.g. hardening findings) -- treat as unchanged
+		}
+		return $existing_hash === $incoming_hash;
+	}
+
+	/**
+	 * Upsert a finding: if a still-relevant row for the same file +
+	 * issue_type + rule already exists, bump last_seen and refresh the
+	 * detail instead of creating a duplicate row every single scan (see
+	 * should_reuse_existing_finding() for exactly what counts as
+	 * "still-relevant"). rule_id is part of the identity so two
 	 * different heuristic rules matching the same file stay two separate
 	 * findings rather than overwriting each other.
 	 */
@@ -282,7 +312,7 @@ class IS_DB {
 
 		$existing = $wpdb->get_row(
 			$wpdb->prepare(
-				"SELECT id, status FROM {$table} WHERE file_path = %s AND issue_type = %s AND rule_id = %s AND status IN ('new','acknowledged') ORDER BY id DESC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				"SELECT id, status, file_hash FROM {$table} WHERE file_path = %s AND issue_type = %s AND rule_id = %s AND status IN ('new','acknowledged','ignored') ORDER BY id DESC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				$finding['file_path'],
 				$finding['issue_type'],
 				$rule_id
@@ -290,7 +320,7 @@ class IS_DB {
 			ARRAY_A
 		);
 
-		if ( $existing ) {
+		if ( $existing && self::should_reuse_existing_finding( $existing, $finding ) ) {
 			$wpdb->update(
 				$table,
 				array(
@@ -306,7 +336,10 @@ class IS_DB {
 				null,
 				array( '%d' )
 			);
-			return array( 'id' => (int) $existing['id'], 'is_new' => false );
+			return array(
+				'id'     => (int) $existing['id'],
+				'is_new' => false,
+			);
 		}
 
 		$wpdb->insert(
@@ -326,7 +359,10 @@ class IS_DB {
 			),
 			array( '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' )
 		);
-		return array( 'id' => (int) $wpdb->insert_id, 'is_new' => true );
+		return array(
+			'id'     => (int) $wpdb->insert_id,
+			'is_new' => true,
+		);
 	}
 
 	/**
@@ -348,9 +384,9 @@ class IS_DB {
 
 	public function get_findings( array $args = array() ) {
 		global $wpdb;
-		$table   = $this->findings_table();
-		$where   = array( '1=1' );
-		$params  = array();
+		$table  = $this->findings_table();
+		$where  = array( '1=1' );
+		$params = array();
 
 		if ( ! empty( $args['status'] ) ) {
 			$where[]  = 'status = %s';
@@ -368,7 +404,7 @@ class IS_DB {
 		$limit  = isset( $args['limit'] ) ? (int) $args['limit'] : 50;
 		$offset = isset( $args['offset'] ) ? (int) $args['offset'] : 0;
 
-		$sql = "SELECT * FROM {$table} WHERE " . implode( ' AND ', $where ) . " ORDER BY FIELD(severity,'critical','high','medium','low','info'), last_seen DESC LIMIT %d OFFSET %d";
+		$sql      = "SELECT * FROM {$table} WHERE " . implode( ' AND ', $where ) . " ORDER BY FIELD(severity,'critical','high','medium','low','info'), last_seen DESC LIMIT %d OFFSET %d";
 		$params[] = $limit;
 		$params[] = $offset;
 

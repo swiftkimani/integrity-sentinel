@@ -80,12 +80,21 @@ class HeuristicsTest extends TestCase {
 
 	public function test_detects_suppressed_variable_include() {
 		$content = '<?php @' . 'include($dropped_path);';
-		$this->assertNotNull( $this->find_rule( $this->scan( $content ), 'suspicious_error_suppressed_include' ) );
+		$hit      = $this->find_rule( $this->scan( $content ), 'suspicious_error_suppressed_include' );
+		$this->assertNotNull( $hit );
+		// 'low', not 'medium': this pattern alone is routine in legitimate
+		// theme/plugin template-loading code -- a weak signal on its own.
+		$this->assertSame( 'low', $hit['severity'] );
 	}
 
 	public function test_detects_long_base64_blob() {
 		$content = '<?php $p = "' . str_repeat( 'QWxh', 150 ) . '";';
-		$this->assertNotNull( $this->find_rule( $this->scan( $content ), 'long_base64_blob' ) );
+		$hit      = $this->find_rule( $this->scan( $content ), 'long_base64_blob' );
+		$this->assertNotNull( $hit );
+		// 'low', not 'medium': a long base64-looking string alone is
+		// common in legitimate code (embedded fonts/images, license
+		// keys); the dangerous combination has its own 'eval_base64' rule.
+		$this->assertSame( 'low', $hit['severity'] );
 	}
 
 	public function test_detects_known_webshell_marker() {

@@ -230,9 +230,25 @@
 		});
 	}
 
+	// ---------------------------------------------------------------
+	// Quarantine table
+	// ---------------------------------------------------------------
+
+	function initQuarantineDeleteToggles() {
+		document.querySelectorAll('.is-quarantine-delete-toggle').forEach(function (btn) {
+			btn.addEventListener('click', function () {
+				var form = document.getElementById('is-quarantine-delete-form-' + btn.getAttribute('data-id'));
+				if (form) {
+					form.style.display = form.style.display === 'none' ? 'block' : 'none';
+				}
+			});
+		});
+	}
+
 	document.addEventListener('DOMContentLoaded', function () {
 		initScanButton();
 		initFindingActions();
 		initFindingModal();
+		initQuarantineDeleteToggles();
 	});
 })();

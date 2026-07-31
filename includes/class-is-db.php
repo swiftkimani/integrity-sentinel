@@ -4,7 +4,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Owns the two custom tables this plugin needs. A custom table (rather
+ * Owns the custom tables this plugin needs. A custom table (rather
  * than options/postmeta) is the right call here because a single scan on
  * a mid-sized site can produce thousands of file-level rows that need to
  * be paginated, filtered by severity/status, and queried efficiently --
@@ -48,6 +48,11 @@ class IS_DB {
 		return $wpdb->prefix . 'is_audit_log';
 	}
 
+	public function quarantine_table() {
+		global $wpdb;
+		return $wpdb->prefix . 'is_quarantine';
+	}
+
 	public function maybe_upgrade() {
 		if ( get_option( 'is_db_version' ) !== IS_DB_VERSION ) {
 			$this->create_tables();
@@ -59,10 +64,11 @@ class IS_DB {
 		global $wpdb;
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
-		$charset_collate = $wpdb->get_charset_collate();
-		$runs_table      = $this->runs_table();
-		$findings_table  = $this->findings_table();
-		$audit_table     = $this->audit_table();
+		$charset_collate  = $wpdb->get_charset_collate();
+		$runs_table       = $this->runs_table();
+		$findings_table   = $this->findings_table();
+		$audit_table      = $this->audit_table();
+		$quarantine_table = $this->quarantine_table();
 
 		$sql = "CREATE TABLE {$runs_table} (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -112,6 +118,24 @@ class IS_DB {
 			PRIMARY KEY  (id),
 			KEY action (action),
 			KEY created_at (created_at)
+		) {$charset_collate};
+
+		CREATE TABLE {$quarantine_table} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			finding_id BIGINT UNSIGNED NULL,
+			original_path VARCHAR(500) NOT NULL,
+			quarantine_path VARCHAR(500) NOT NULL,
+			file_hash VARCHAR(64) NULL,
+			file_size BIGINT UNSIGNED NULL,
+			reason TEXT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'quarantined',
+			quarantined_by BIGINT UNSIGNED NOT NULL DEFAULT 0,
+			quarantined_at DATETIME NOT NULL,
+			reviewed_by BIGINT UNSIGNED NULL,
+			reviewed_at DATETIME NULL,
+			PRIMARY KEY  (id),
+			KEY status (status),
+			KEY original_path (original_path(191))
 		) {$charset_collate};";
 
 		dbDelta( $sql );
@@ -489,5 +513,73 @@ class IS_DB {
 	public function set_finding_status( $id, $status ) {
 		global $wpdb;
 		$wpdb->update( $this->findings_table(), array( 'status' => $status ), array( 'id' => $id ), array( '%s' ), array( '%d' ) );
+	}
+
+	// ---------------------------------------------------------------
+	// Quarantine
+	// ---------------------------------------------------------------
+
+	public function insert_quarantine_record( array $record ) {
+		global $wpdb;
+		$now = current_time( 'mysql' );
+		$wpdb->insert(
+			$this->quarantine_table(),
+			array(
+				'finding_id'      => $record['finding_id'] ?? null,
+				'original_path'   => $record['original_path'],
+				'quarantine_path' => $record['quarantine_path'],
+				'file_hash'       => $record['file_hash'] ?? null,
+				'file_size'       => $record['file_size'] ?? null,
+				'reason'          => $record['reason'] ?? '',
+				'status'          => 'quarantined',
+				'quarantined_by'  => $record['quarantined_by'] ?? 0,
+				'quarantined_at'  => $now,
+			),
+			array( '%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%s' )
+		);
+		return (int) $wpdb->insert_id;
+	}
+
+	public function get_quarantine_item( $id ) {
+		global $wpdb;
+		return $wpdb->get_row(
+			$wpdb->prepare( "SELECT * FROM {$this->quarantine_table()} WHERE id = %d", $id ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			ARRAY_A
+		);
+	}
+
+	public function get_quarantine_items( $status = 'quarantined', $limit = 50, $offset = 0 ) {
+		global $wpdb;
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM {$this->quarantine_table()} WHERE status = %s ORDER BY id DESC LIMIT %d OFFSET %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$status,
+				max( 1, (int) $limit ),
+				max( 0, (int) $offset )
+			),
+			ARRAY_A
+		);
+	}
+
+	public function count_quarantine_items( $status = 'quarantined' ) {
+		global $wpdb;
+		return (int) $wpdb->get_var(
+			$wpdb->prepare( "SELECT COUNT(*) FROM {$this->quarantine_table()} WHERE status = %s", $status ) // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		);
+	}
+
+	public function set_quarantine_status( $id, $status, $reviewed_by ) {
+		global $wpdb;
+		$wpdb->update(
+			$this->quarantine_table(),
+			array(
+				'status'      => $status,
+				'reviewed_by' => $reviewed_by,
+				'reviewed_at' => current_time( 'mysql' ),
+			),
+			array( 'id' => $id ),
+			array( '%s', '%d', '%s' ),
+			array( '%d' )
+		);
 	}
 }

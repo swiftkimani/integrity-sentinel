@@ -26,6 +26,9 @@ class IS_Admin {
 		add_action( 'admin_post_is_apply_hotlink_block', array( $this, 'handle_apply_hotlink_block' ) );
 		add_action( 'admin_post_is_remove_hotlink_block', array( $this, 'handle_remove_hotlink_block' ) );
 		add_action( 'admin_post_is_reset_module_health', array( $this, 'handle_reset_module_health' ) );
+		add_action( 'admin_post_is_quarantine_finding', array( $this, 'handle_quarantine_finding' ) );
+		add_action( 'admin_post_is_quarantine_restore', array( $this, 'handle_quarantine_restore' ) );
+		add_action( 'admin_post_is_quarantine_delete', array( $this, 'handle_quarantine_delete' ) );
 	}
 
 	public function add_menu() {
@@ -40,6 +43,7 @@ class IS_Admin {
 		);
 		add_submenu_page( 'integrity-sentinel', __( 'Dashboard', 'integrity-sentinel' ), __( 'Dashboard', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel', array( $this, 'render_dashboard' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Findings', 'integrity-sentinel' ), __( 'Findings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-findings', array( $this, 'render_findings' ) );
+		add_submenu_page( 'integrity-sentinel', __( 'Quarantine', 'integrity-sentinel' ), __( 'Quarantine', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-quarantine', array( $this, 'render_quarantine' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Hardening', 'integrity-sentinel' ), __( 'Hardening', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-hardening', array( $this, 'render_hardening' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Access Control', 'integrity-sentinel' ), __( 'Access Control', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-access', array( $this, 'render_access_control' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Login Security', 'integrity-sentinel' ), __( 'Login Security', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-login', array( $this, 'render_login_security' ) );
@@ -481,6 +485,63 @@ class IS_Admin {
 		exit;
 	}
 
+	private function guard_quarantine_action() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
+		}
+		check_admin_referer( 'is_quarantine_action' );
+	}
+
+	public function handle_quarantine_finding() {
+		$this->guard_quarantine_action();
+
+		$finding_id = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0;
+		$finding    = $finding_id ? IS_DB::instance()->get_finding( $finding_id ) : null;
+		$url        = admin_url( 'admin.php?page=integrity-sentinel-findings' );
+
+		if ( ! $finding ) {
+			wp_safe_redirect( add_query_arg( 'is_error', rawurlencode( __( 'Finding not found.', 'integrity-sentinel' ) ), $url ) );
+			exit;
+		}
+
+		$result = IS_Quarantine::quarantine_finding( $finding, get_current_user_id() );
+		if ( is_wp_error( $result ) ) {
+			$url = add_query_arg( 'is_error', rawurlencode( $result->get_error_message() ), $url );
+		} else {
+			$url = add_query_arg( 'is_quarantined', '1', $url );
+		}
+		wp_safe_redirect( $url );
+		exit;
+	}
+
+	public function handle_quarantine_restore() {
+		$this->guard_quarantine_action();
+		$id     = isset( $_POST['quarantine_id'] ) ? (int) $_POST['quarantine_id'] : 0;
+		$result = $id ? IS_Quarantine::restore( $id, get_current_user_id() ) : new WP_Error( 'is_quarantine_invalid', __( 'Invalid request.', 'integrity-sentinel' ) );
+		$this->redirect_quarantine( $result );
+	}
+
+	public function handle_quarantine_delete() {
+		$this->guard_quarantine_action();
+
+		if ( empty( $_POST['is_quarantine_confirm'] ) ) {
+			$this->redirect_quarantine( new WP_Error( 'is_quarantine_not_confirmed', __( 'You must check the confirmation box to permanently delete a file.', 'integrity-sentinel' ) ) );
+		}
+
+		$id     = isset( $_POST['quarantine_id'] ) ? (int) $_POST['quarantine_id'] : 0;
+		$result = $id ? IS_Quarantine::delete_permanently( $id, get_current_user_id() ) : new WP_Error( 'is_quarantine_invalid', __( 'Invalid request.', 'integrity-sentinel' ) );
+		$this->redirect_quarantine( $result );
+	}
+
+	private function redirect_quarantine( $result ) {
+		$url = admin_url( 'admin.php?page=integrity-sentinel-quarantine' );
+		if ( is_wp_error( $result ) ) {
+			$url = add_query_arg( 'is_error', rawurlencode( $result->get_error_message() ), $url );
+		}
+		wp_safe_redirect( $url );
+		exit;
+	}
+
 	private function guard_hardening_action() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -689,9 +750,16 @@ class IS_Admin {
 			)
 		);
 		$pages    = max( 1, (int) ceil( $total / $per_page ) );
+		$error    = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Findings', 'integrity-sentinel' ); ?></h1>
+			<?php if ( $error ) : ?>
+				<div class="notice notice-error"><p><?php echo esc_html( $error ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( isset( $_GET['is_quarantined'] ) ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only flag from our own redirect ?>
+				<div class="notice notice-success"><p><?php esc_html_e( 'File moved to quarantine. It has not been deleted — review it under Quarantine.', 'integrity-sentinel' ); ?></p></div>
+			<?php endif; ?>
 			<p class="description"><?php esc_html_e( 'Ignoring a finding stays durable: it won\'t reappear on later scans as long as the file\'s content is unchanged. If the file actually changes afterward, it\'s flagged again as new — an old "ignore" never silently covers different content.', 'integrity-sentinel' ); ?></p>
 
 			<ul class="subsubsub">
@@ -750,6 +818,15 @@ class IS_Admin {
 									<a href="#" class="is-finding-action" data-id="<?php echo esc_attr( $f['id'] ); ?>" data-status="acknowledged"><?php esc_html_e( 'Acknowledge', 'integrity-sentinel' ); ?></a> |
 									<a href="#" class="is-finding-action" data-id="<?php echo esc_attr( $f['id'] ); ?>" data-status="ignored"><?php esc_html_e( 'Ignore', 'integrity-sentinel' ); ?></a> |
 									<a href="#" class="is-finding-action" data-id="<?php echo esc_attr( $f['id'] ); ?>" data-status="resolved"><?php esc_html_e( 'Mark resolved', 'integrity-sentinel' ); ?></a>
+									<?php if ( IS_Quarantine::is_eligible_issue_type( $f['issue_type'] ) ) : ?>
+										|
+										<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;" onsubmit="return confirm('<?php echo esc_js( __( 'Move this file to quarantine? It is suspended, not deleted, and can be restored from the Quarantine screen at any time.', 'integrity-sentinel' ) ); ?>');">
+											<?php wp_nonce_field( 'is_quarantine_action' ); ?>
+											<input type="hidden" name="action" value="is_quarantine_finding">
+											<input type="hidden" name="finding_id" value="<?php echo esc_attr( $f['id'] ); ?>">
+											<button type="submit" class="button-link" style="color:#b32d2e;"><?php esc_html_e( 'Quarantine', 'integrity-sentinel' ); ?></button>
+										</form>
+									<?php endif; ?>
 								<?php else : ?>
 									<em><?php echo esc_html( ucfirst( $f['status'] ) ); ?></em>
 								<?php endif; ?>
@@ -784,6 +861,134 @@ class IS_Admin {
 					<div id="is-finding-modal-body"></div>
 				</div>
 			</div>
+		</div>
+		<?php
+	}
+
+	// -----------------------------------------------------------------
+	// Quarantine
+	// -----------------------------------------------------------------
+
+	/**
+	 * Suspended files awaiting human review: restore to the original
+	 * location, or permanently delete (behind an explicit confirmation
+	 * checkbox -- this is the one truly irreversible action in the
+	 * whole plugin). Nothing here happens automatically or on a
+	 * schedule; every quarantine/restore/delete is a human decision.
+	 */
+	public function render_quarantine() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$db       = IS_DB::instance();
+		$status   = isset( $_GET['status'] ) ? sanitize_key( wp_unslash( $_GET['status'] ) ) : 'quarantined'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only filter, not a state change
+		$paged    = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$per_page = 30;
+		$error    = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+
+		$items = $db->get_quarantine_items( $status, $per_page, ( $paged - 1 ) * $per_page );
+		$total = $db->count_quarantine_items( $status );
+		$pages = max( 1, (int) ceil( $total / $per_page ) );
+		?>
+		<div class="wrap is-wrap">
+			<h1><?php esc_html_e( 'Quarantine', 'integrity-sentinel' ); ?></h1>
+			<?php if ( $error ) : ?>
+				<div class="notice notice-error"><p><?php echo esc_html( $error ); ?></p></div>
+			<?php endif; ?>
+			<p class="description">
+				<?php esc_html_e( 'A quarantined file is suspended, not deleted: moved into a locked-down directory outside its original location, and left there until you explicitly restore it or permanently delete it. Nothing here happens automatically.', 'integrity-sentinel' ); ?>
+			</p>
+
+			<ul class="subsubsub">
+				<?php
+				$statuses = array(
+					'quarantined' => __( 'Awaiting review', 'integrity-sentinel' ),
+					'restored'    => __( 'Restored', 'integrity-sentinel' ),
+					'deleted'     => __( 'Deleted', 'integrity-sentinel' ),
+				);
+				$links    = array();
+				foreach ( $statuses as $key => $label ) {
+					$url     = add_query_arg(
+						array(
+							'page'   => 'integrity-sentinel-quarantine',
+							'status' => $key,
+						),
+						admin_url( 'admin.php' )
+					);
+					$class   = ( $status === $key ) ? 'current' : '';
+					$links[] = sprintf( '<a href="%s" class="%s">%s</a>', esc_url( $url ), esc_attr( $class ), esc_html( $label ) );
+				}
+				echo wp_kses_post( implode( ' | ', $links ) );
+				?>
+			</ul>
+
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'Original path', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Reason', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Quarantined', 'integrity-sentinel' ); ?></th>
+						<?php if ( 'quarantined' === $status ) : ?>
+							<th><?php esc_html_e( 'Actions', 'integrity-sentinel' ); ?></th>
+						<?php else : ?>
+							<th><?php esc_html_e( 'Reviewed', 'integrity-sentinel' ); ?></th>
+						<?php endif; ?>
+					</tr>
+				</thead>
+				<tbody>
+					<?php if ( empty( $items ) ) : ?>
+						<tr><td colspan="4"><?php esc_html_e( 'Nothing in this view.', 'integrity-sentinel' ); ?></td></tr>
+					<?php endif; ?>
+					<?php foreach ( $items as $item ) : ?>
+						<tr>
+							<td><code><?php echo esc_html( $item['original_path'] ); ?></code></td>
+							<td><?php echo esc_html( $item['reason'] ); ?></td>
+							<td><?php echo esc_html( human_time_diff( strtotime( $item['quarantined_at'] ) ) . ' ' . __( 'ago', 'integrity-sentinel' ) ); ?></td>
+							<?php if ( 'quarantined' === $status ) : ?>
+								<td>
+									<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+										<?php wp_nonce_field( 'is_quarantine_action' ); ?>
+										<input type="hidden" name="action" value="is_quarantine_restore">
+										<input type="hidden" name="quarantine_id" value="<?php echo esc_attr( $item['id'] ); ?>">
+										<?php submit_button( __( 'Restore', 'integrity-sentinel' ), 'secondary small', 'submit', false ); ?>
+									</form>
+									<button type="button" class="button button-small is-quarantine-delete-toggle" data-id="<?php echo esc_attr( $item['id'] ); ?>"><?php esc_html_e( 'Delete permanently…', 'integrity-sentinel' ); ?></button>
+									<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" id="is-quarantine-delete-form-<?php echo esc_attr( $item['id'] ); ?>" style="display:none;margin-top:6px;">
+										<?php wp_nonce_field( 'is_quarantine_action' ); ?>
+										<input type="hidden" name="action" value="is_quarantine_delete">
+										<input type="hidden" name="quarantine_id" value="<?php echo esc_attr( $item['id'] ); ?>">
+										<label>
+											<input type="checkbox" name="is_quarantine_confirm" value="1" required>
+											<?php esc_html_e( 'I understand this cannot be undone.', 'integrity-sentinel' ); ?>
+										</label>
+										<?php submit_button( __( 'Permanently delete', 'integrity-sentinel' ), 'delete small', 'submit', false ); ?>
+									</form>
+								</td>
+							<?php else : ?>
+								<td><?php echo $item['reviewed_at'] ? esc_html( human_time_diff( strtotime( $item['reviewed_at'] ) ) . ' ' . __( 'ago', 'integrity-sentinel' ) ) : '—'; ?></td>
+							<?php endif; ?>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+
+			<?php if ( $pages > 1 ) : ?>
+				<div class="tablenav"><div class="tablenav-pages">
+					<?php
+					for ( $p = 1; $p <= $pages; $p++ ) {
+						$url = add_query_arg(
+							array(
+								'page'   => 'integrity-sentinel-quarantine',
+								'status' => $status,
+								'paged'  => $p,
+							),
+							admin_url( 'admin.php' )
+						);
+						printf( '<a class="%s" href="%s">%d</a> ', $p === $paged ? 'current' : '', esc_url( $url ), (int) $p ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+					}
+					?>
+				</div></div>
+			<?php endif; ?>
 		</div>
 		<?php
 	}

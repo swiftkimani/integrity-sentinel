@@ -4,7 +4,7 @@ Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.15.1
+Stable tag: 1.16.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -189,6 +189,22 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.16.0 =
+* New: single-page "app shell" UI — every Integrity Sentinel screen now
+  shares one left sidebar (Dashboard, Findings, Quarantine, Hardening,
+  Access Control, Login Security, REST API, Audit Log, Settings) inside
+  the plugin's own page, instead of a flyout submenu under WP's admin
+  menu. WordPress's admin sidebar now shows a single clean "Integrity
+  Sentinel" entry. Restyled with a modern, cohesive design system
+  (dark sidebar, indigo accents, card-based content, refined
+  typography) across every screen, verified in a live browser.
+* Fix (found during that verification): registering pages with
+  remove_submenu_page() to hide them from WP's flyout also deletes the
+  bookkeeping WordPress's own access-control check depends on, so
+  every hidden page except the first started returning "Sorry, you are
+  not allowed to access this page." Fixed by keeping every page fully
+  registered and hiding only the visible flyout via CSS instead.
 
 = 1.15.1 =
 * Fix: IP blacklisting, login URL rename, and AI-bot blocking were

@@ -29,6 +29,17 @@ class IS_Plugin_Checksums {
 	const CACHE_TTL = 12 * HOUR_IN_SECONDS;
 
 	/**
+	 * How long to remember that a slug+version has NO published checksums
+	 * (a 404). Premium/custom plugins 404 forever, so without negative
+	 * caching every scan re-requests every unverifiable plugin. A week is
+	 * safe because the cache key includes the version -- an update busts it.
+	 */
+	const NEGATIVE_CACHE_TTL = WEEK_IN_SECONDS;
+
+	/** Sentinel stored in the transient for a cached 404. */
+	const NOT_AVAILABLE = 'is_not_available';
+
+	/**
 	 * @return array|WP_Error Map of relative-path (within the plugin
 	 *                        folder) => array of acceptable md5/sha256
 	 *                        hashes, or WP_Error on failure.
@@ -36,6 +47,9 @@ class IS_Plugin_Checksums {
 	public function get_checksums( $slug, $version ) {
 		$cache_key = 'is_plugin_checksums_' . md5( $slug . '|' . $version );
 		$cached    = get_transient( $cache_key );
+		if ( self::NOT_AVAILABLE === $cached ) {
+			return $this->not_found_error( $slug, $version );
+		}
 		if ( is_array( $cached ) ) {
 			return $cached;
 		}
@@ -53,15 +67,8 @@ class IS_Plugin_Checksums {
 
 		$code = wp_remote_retrieve_response_code( $response );
 		if ( 404 === $code ) {
-			return new WP_Error(
-				'is_plugin_checksums_not_found',
-				sprintf(
-					/* translators: 1: plugin slug, 2: plugin version */
-					__( 'No published checksums for %1$s %2$s — this is expected for plugins not hosted on WordPress.org, and sometimes for older versions of hosted plugins.', 'integrity-sentinel' ),
-					$slug,
-					$version
-				)
-			);
+			set_transient( $cache_key, self::NOT_AVAILABLE, self::NEGATIVE_CACHE_TTL );
+			return $this->not_found_error( $slug, $version );
 		}
 		if ( 200 !== $code ) {
 			return new WP_Error( 'is_plugin_checksums_http', sprintf(
@@ -83,6 +90,18 @@ class IS_Plugin_Checksums {
 		return $parsed;
 	}
 
+	private function not_found_error( $slug, $version ) {
+		return new WP_Error(
+			'is_plugin_checksums_not_found',
+			sprintf(
+				/* translators: 1: plugin slug, 2: plugin version */
+				__( 'No published checksums for %1$s %2$s — this is expected for plugins not hosted on WordPress.org, and sometimes for older versions of hosted plugins.', 'integrity-sentinel' ),
+				$slug,
+				$version
+			)
+		);
+	}
+
 	/**
 	 * The endpoint's documented shape is:
 	 *   { "files": { "relative/path.php": { "md5": "...", "sha256": "..." }, ... } }
@@ -92,7 +111,7 @@ class IS_Plugin_Checksums {
 	 * of that into path => [hash, hash, ...] so the comparison code only
 	 * has to deal with one shape.
 	 */
-	private function normalize_response( $body ) {
+	public function normalize_response( $body ) {
 		if ( ! is_array( $body ) ) {
 			return new WP_Error( 'is_plugin_checksums_bad_json', __( 'Checksum response was not valid JSON.', 'integrity-sentinel' ) );
 		}

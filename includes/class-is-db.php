@@ -4,7 +4,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Owns the two custom tables this plugin needs. A custom table (rather
+ * Owns the custom tables this plugin needs. A custom table (rather
  * than options/postmeta) is the right call here because a single scan on
  * a mid-sized site can produce thousands of file-level rows that need to
  * be paginated, filtered by severity/status, and queried efficiently --
@@ -13,6 +13,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 class IS_DB {
 
 	private static $instance = null;
+
+	/**
+	 * How long a batch lock may be held before another process is allowed
+	 * to steal it. Generous because run completion includes remote
+	 * checksum-API calls that can legitimately take a couple of minutes
+	 * on a plugin-heavy site with a cold cache.
+	 */
+	const LOCK_TTL = 5 * MINUTE_IN_SECONDS;
 
 	public static function instance() {
 		if ( null === self::$instance ) {
@@ -35,6 +43,16 @@ class IS_DB {
 		return $wpdb->prefix . 'is_findings';
 	}
 
+	public function audit_table() {
+		global $wpdb;
+		return $wpdb->prefix . 'is_audit_log';
+	}
+
+	public function quarantine_table() {
+		global $wpdb;
+		return $wpdb->prefix . 'is_quarantine';
+	}
+
 	public function maybe_upgrade() {
 		if ( get_option( 'is_db_version' ) !== IS_DB_VERSION ) {
 			$this->create_tables();
@@ -46,9 +64,11 @@ class IS_DB {
 		global $wpdb;
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
-		$charset_collate = $wpdb->get_charset_collate();
+		$charset_collate  = $wpdb->get_charset_collate();
 		$runs_table       = $this->runs_table();
 		$findings_table   = $this->findings_table();
+		$audit_table      = $this->audit_table();
+		$quarantine_table = $this->quarantine_table();
 
 		$sql = "CREATE TABLE {$runs_table} (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -56,8 +76,10 @@ class IS_DB {
 			trigger_type VARCHAR(20) NOT NULL DEFAULT 'manual',
 			started_at DATETIME NOT NULL,
 			finished_at DATETIME NULL,
+			last_activity_at DATETIME NULL,
 			files_total INT UNSIGNED NOT NULL DEFAULT 0,
 			files_scanned INT UNSIGNED NOT NULL DEFAULT 0,
+			cursor_offset INT UNSIGNED NOT NULL DEFAULT 0,
 			findings_new INT UNSIGNED NOT NULL DEFAULT 0,
 			cursor_data LONGTEXT NULL,
 			error_message TEXT NULL,
@@ -83,6 +105,37 @@ class IS_DB {
 			KEY severity (severity),
 			KEY status (status),
 			KEY run_id (run_id)
+		) {$charset_collate};
+
+		CREATE TABLE {$audit_table} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			created_at DATETIME NOT NULL,
+			user_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+			user_login VARCHAR(60) NOT NULL DEFAULT '',
+			ip VARCHAR(45) NOT NULL DEFAULT '',
+			action VARCHAR(40) NOT NULL,
+			detail TEXT NULL,
+			PRIMARY KEY  (id),
+			KEY action (action),
+			KEY created_at (created_at)
+		) {$charset_collate};
+
+		CREATE TABLE {$quarantine_table} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			finding_id BIGINT UNSIGNED NULL,
+			original_path VARCHAR(500) NOT NULL,
+			quarantine_path VARCHAR(500) NOT NULL,
+			file_hash VARCHAR(64) NULL,
+			file_size BIGINT UNSIGNED NULL,
+			reason TEXT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'quarantined',
+			quarantined_by BIGINT UNSIGNED NOT NULL DEFAULT 0,
+			quarantined_at DATETIME NOT NULL,
+			reviewed_by BIGINT UNSIGNED NULL,
+			reviewed_at DATETIME NULL,
+			PRIMARY KEY  (id),
+			KEY status (status),
+			KEY original_path (original_path(191))
 		) {$charset_collate};";
 
 		dbDelta( $sql );
@@ -94,14 +147,16 @@ class IS_DB {
 
 	public function create_run( $trigger_type = 'manual' ) {
 		global $wpdb;
+		$now = current_time( 'mysql' );
 		$wpdb->insert(
 			$this->runs_table(),
 			array(
-				'status'       => 'running',
-				'trigger_type' => $trigger_type,
-				'started_at'   => current_time( 'mysql' ),
+				'status'           => 'running',
+				'trigger_type'     => $trigger_type,
+				'started_at'       => $now,
+				'last_activity_at' => $now,
 			),
-			array( '%s', '%s', '%s' )
+			array( '%s', '%s', '%s', '%s' )
 		);
 		return (int) $wpdb->insert_id;
 	}
@@ -124,6 +179,11 @@ class IS_DB {
 		return $wpdb->get_row( "SELECT * FROM {$this->runs_table()} WHERE status = 'running' ORDER BY id DESC LIMIT 1", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 	}
 
+	public function get_latest_completed_run() {
+		global $wpdb;
+		return $wpdb->get_row( "SELECT * FROM {$this->runs_table()} WHERE status = 'completed' ORDER BY id DESC LIMIT 1", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+	}
+
 	public function update_run( $run_id, array $fields ) {
 		global $wpdb;
 		$formats = array();
@@ -133,17 +193,97 @@ class IS_DB {
 		$wpdb->update( $this->runs_table(), $fields, array( 'id' => $run_id ), $formats, array( '%d' ) );
 	}
 
-	public function set_run_cursor( $run_id, array $cursor ) {
-		$this->update_run( $run_id, array( 'cursor_data' => wp_json_encode( $cursor ) ) );
+	/**
+	 * The immutable file list for a run, written once at start_run() and
+	 * only ever read afterwards. The moving parts (offset, counters) live
+	 * in their own small columns -- rewriting a multi-megabyte JSON blob
+	 * after every batch was the old design's biggest scaling problem.
+	 */
+	public function set_run_files( $run_id, array $files ) {
+		$this->update_run( $run_id, array( 'cursor_data' => wp_json_encode( $files ) ) );
 	}
 
-	public function get_run_cursor( $run_id ) {
+	/**
+	 * @return array|null Flat list of relative paths, or null if missing/corrupt.
+	 */
+	public function get_run_files( $run_id ) {
 		$run = $this->get_run( $run_id );
 		if ( ! $run || empty( $run['cursor_data'] ) ) {
 			return null;
 		}
 		$decoded = json_decode( $run['cursor_data'], true );
-		return is_array( $decoded ) ? $decoded : null;
+		if ( ! is_array( $decoded ) ) {
+			return null;
+		}
+		// Back-compat: a v1 cursor was {"files": [...], "offset": n}.
+		if ( isset( $decoded['files'] ) && is_array( $decoded['files'] ) ) {
+			return $decoded['files'];
+		}
+		return array_values( $decoded );
+	}
+
+	/**
+	 * Atomically advance the scan cursor and add this step's new-finding
+	 * count. findings_new is incremented in SQL (not read-modify-write in
+	 * PHP) so two processes briefly overlapping can't lose each other's
+	 * updates.
+	 */
+	public function advance_run( $run_id, $offset, $findings_delta = 0 ) {
+		global $wpdb;
+		$wpdb->query(
+			$wpdb->prepare(
+				"UPDATE {$this->runs_table()} SET cursor_offset = %d, files_scanned = %d, findings_new = findings_new + %d, last_activity_at = %s WHERE id = %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$offset,
+				$offset,
+				max( 0, (int) $findings_delta ),
+				current_time( 'mysql' ),
+				$run_id
+			)
+		);
+	}
+
+	public function increment_findings( $run_id, $delta ) {
+		global $wpdb;
+		$wpdb->query(
+			$wpdb->prepare(
+				"UPDATE {$this->runs_table()} SET findings_new = findings_new + %d WHERE id = %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				max( 0, (int) $delta ),
+				$run_id
+			)
+		);
+	}
+
+	// ---------------------------------------------------------------
+	// Batch locking
+	// ---------------------------------------------------------------
+
+	/**
+	 * Advisory lock so only one process (browser AJAX loop, daily cron,
+	 * resume cron, WP-CLI) drives a run's batches at a time. Implemented
+	 * on the options table: add_option() is backed by an INSERT that
+	 * fails if the row exists, which makes acquisition effectively
+	 * atomic. A stale lock (holder fataled mid-batch) is stolen after
+	 * LOCK_TTL rather than blocking the scan forever.
+	 */
+	public function acquire_scan_lock( $run_id ) {
+		$name = 'is_scan_lock_' . (int) $run_id;
+		$now  = time();
+
+		if ( add_option( $name, (string) $now, '', false ) ) {
+			return true;
+		}
+
+		$held_at = (int) get_option( $name );
+		if ( $held_at && ( $now - $held_at ) > self::LOCK_TTL ) {
+			update_option( $name, (string) $now, false );
+			return true;
+		}
+
+		return false;
+	}
+
+	public function release_scan_lock( $run_id ) {
+		delete_option( 'is_scan_lock_' . (int) $run_id );
 	}
 
 	// ---------------------------------------------------------------
@@ -151,32 +291,66 @@ class IS_DB {
 	// ---------------------------------------------------------------
 
 	/**
-	 * Upsert a finding: if the same file + issue_type from a still-open
-	 * problem already exists (status new/acknowledged), bump last_seen
-	 * and refresh the detail instead of creating a duplicate row every
-	 * single scan.
+	 * Pure: whether a freshly-matched finding should reuse an existing
+	 * row (update in place) rather than insert a new one. new/
+	 * acknowledged rows always refresh, as before. An ignored row also
+	 * stays reused -- and therefore stays ignored -- as long as the
+	 * file's content hasn't actually changed, which is the fix for
+	 * "Ignore" not durably suppressing: previously, an ignored finding
+	 * for an unchanged file would still spawn a brand-new 'new' row on
+	 * the very next scan, because the old matching query excluded
+	 * 'ignored' from its WHERE clause entirely. If the content HAS
+	 * changed since it was ignored, that's a legitimate reason for
+	 * fresh eyes, so a new row is correct in that case.
+	 */
+	public static function should_reuse_existing_finding( array $existing, array $incoming ) {
+		if ( ! in_array( $existing['status'] ?? '', array( 'new', 'acknowledged', 'ignored' ), true ) ) {
+			return false;
+		}
+		if ( 'ignored' !== $existing['status'] ) {
+			return true;
+		}
+
+		$existing_hash = (string) ( $existing['file_hash'] ?? '' );
+		$incoming_hash = (string) ( $incoming['file_hash'] ?? '' );
+		if ( '' === $existing_hash || '' === $incoming_hash ) {
+			return true; // no hash to compare (e.g. hardening findings) -- treat as unchanged
+		}
+		return $existing_hash === $incoming_hash;
+	}
+
+	/**
+	 * Upsert a finding: if a still-relevant row for the same file +
+	 * issue_type + rule already exists, bump last_seen and refresh the
+	 * detail instead of creating a duplicate row every single scan (see
+	 * should_reuse_existing_finding() for exactly what counts as
+	 * "still-relevant"). rule_id is part of the identity so two
+	 * different heuristic rules matching the same file stay two separate
+	 * findings rather than overwriting each other.
 	 */
 	public function record_finding( $run_id, array $finding ) {
 		global $wpdb;
-		$table = $this->findings_table();
-		$now   = current_time( 'mysql' );
+		$table   = $this->findings_table();
+		$now     = current_time( 'mysql' );
+		$rule_id = $finding['rule_id'] ?? $finding['issue_type'];
 
 		$existing = $wpdb->get_row(
 			$wpdb->prepare(
-				"SELECT id, status FROM {$table} WHERE file_path = %s AND issue_type = %s AND status IN ('new','acknowledged') ORDER BY id DESC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				"SELECT id, status, file_hash FROM {$table} WHERE file_path = %s AND issue_type = %s AND rule_id = %s AND status IN ('new','acknowledged','ignored') ORDER BY id DESC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				$finding['file_path'],
-				$finding['issue_type']
+				$finding['issue_type'],
+				$rule_id
 			),
 			ARRAY_A
 		);
 
-		if ( $existing ) {
+		if ( $existing && self::should_reuse_existing_finding( $existing, $finding ) ) {
 			$wpdb->update(
 				$table,
 				array(
 					'run_id'    => $run_id,
 					'severity'  => $finding['severity'],
-					'rule_id'   => $finding['rule_id'] ?? null,
+					'rule_id'   => $rule_id,
 					'detail'    => $finding['detail'] ?? '',
 					'file_hash' => $finding['file_hash'] ?? null,
 					'meta'      => isset( $finding['meta'] ) ? wp_json_encode( $finding['meta'] ) : null,
@@ -186,7 +360,10 @@ class IS_DB {
 				null,
 				array( '%d' )
 			);
-			return array( 'id' => (int) $existing['id'], 'is_new' => false );
+			return array(
+				'id'     => (int) $existing['id'],
+				'is_new' => false,
+			);
 		}
 
 		$wpdb->insert(
@@ -196,7 +373,7 @@ class IS_DB {
 				'file_path'  => $finding['file_path'],
 				'issue_type' => $finding['issue_type'],
 				'severity'   => $finding['severity'],
-				'rule_id'    => $finding['rule_id'] ?? null,
+				'rule_id'    => $rule_id,
 				'detail'     => $finding['detail'] ?? '',
 				'file_hash'  => $finding['file_hash'] ?? null,
 				'meta'       => isset( $finding['meta'] ) ? wp_json_encode( $finding['meta'] ) : null,
@@ -206,13 +383,17 @@ class IS_DB {
 			),
 			array( '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' )
 		);
-		return array( 'id' => (int) $wpdb->insert_id, 'is_new' => true );
+		return array(
+			'id'     => (int) $wpdb->insert_id,
+			'is_new' => true,
+		);
 	}
 
 	/**
 	 * Findings from a previous run that were NOT re-flagged in the given
 	 * run are auto-resolved (the underlying issue is gone -- file fixed,
-	 * restored, or deleted).
+	 * restored, or deleted). Must only be called after *every* check in
+	 * the run (file pass AND checksum passes) has recorded its findings.
 	 */
 	public function auto_resolve_stale_findings( $run_id, $current_run_started_at ) {
 		global $wpdb;
@@ -227,9 +408,9 @@ class IS_DB {
 
 	public function get_findings( array $args = array() ) {
 		global $wpdb;
-		$table   = $this->findings_table();
-		$where   = array( '1=1' );
-		$params  = array();
+		$table  = $this->findings_table();
+		$where  = array( '1=1' );
+		$params = array();
 
 		if ( ! empty( $args['status'] ) ) {
 			$where[]  = 'status = %s';
@@ -247,7 +428,7 @@ class IS_DB {
 		$limit  = isset( $args['limit'] ) ? (int) $args['limit'] : 50;
 		$offset = isset( $args['offset'] ) ? (int) $args['offset'] : 0;
 
-		$sql = "SELECT * FROM {$table} WHERE " . implode( ' AND ', $where ) . " ORDER BY FIELD(severity,'critical','high','medium','low','info'), last_seen DESC LIMIT %d OFFSET %d";
+		$sql      = "SELECT * FROM {$table} WHERE " . implode( ' AND ', $where ) . " ORDER BY FIELD(severity,'critical','high','medium','low','info'), last_seen DESC LIMIT %d OFFSET %d";
 		$params[] = $limit;
 		$params[] = $offset;
 
@@ -283,6 +464,29 @@ class IS_DB {
 			$wpdb->prepare( "SELECT severity, COUNT(*) as c FROM {$table} WHERE status = %s GROUP BY severity", $status ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			ARRAY_A
 		);
+		return $this->fill_severity_counts( $rows );
+	}
+
+	/**
+	 * Severity counts for findings that first appeared during the given
+	 * run -- what an alert email should mean by "N new issue(s)", as
+	 * opposed to every unacknowledged finding ever.
+	 */
+	public function severity_counts_for_run( $run_id, $run_started_at ) {
+		global $wpdb;
+		$table = $this->findings_table();
+		$rows  = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT severity, COUNT(*) as c FROM {$table} WHERE run_id = %d AND status = 'new' AND first_seen >= %s GROUP BY severity", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$run_id,
+				$run_started_at
+			),
+			ARRAY_A
+		);
+		return $this->fill_severity_counts( $rows );
+	}
+
+	private function fill_severity_counts( $rows ) {
 		$counts = array(
 			'critical' => 0,
 			'high'     => 0,
@@ -290,7 +494,7 @@ class IS_DB {
 			'low'      => 0,
 			'info'     => 0,
 		);
-		foreach ( $rows as $row ) {
+		foreach ( (array) $rows as $row ) {
 			if ( isset( $counts[ $row['severity'] ] ) ) {
 				$counts[ $row['severity'] ] = (int) $row['c'];
 			}
@@ -309,5 +513,73 @@ class IS_DB {
 	public function set_finding_status( $id, $status ) {
 		global $wpdb;
 		$wpdb->update( $this->findings_table(), array( 'status' => $status ), array( 'id' => $id ), array( '%s' ), array( '%d' ) );
+	}
+
+	// ---------------------------------------------------------------
+	// Quarantine
+	// ---------------------------------------------------------------
+
+	public function insert_quarantine_record( array $record ) {
+		global $wpdb;
+		$now = current_time( 'mysql' );
+		$wpdb->insert(
+			$this->quarantine_table(),
+			array(
+				'finding_id'      => $record['finding_id'] ?? null,
+				'original_path'   => $record['original_path'],
+				'quarantine_path' => $record['quarantine_path'],
+				'file_hash'       => $record['file_hash'] ?? null,
+				'file_size'       => $record['file_size'] ?? null,
+				'reason'          => $record['reason'] ?? '',
+				'status'          => 'quarantined',
+				'quarantined_by'  => $record['quarantined_by'] ?? 0,
+				'quarantined_at'  => $now,
+			),
+			array( '%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%s' )
+		);
+		return (int) $wpdb->insert_id;
+	}
+
+	public function get_quarantine_item( $id ) {
+		global $wpdb;
+		return $wpdb->get_row(
+			$wpdb->prepare( "SELECT * FROM {$this->quarantine_table()} WHERE id = %d", $id ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			ARRAY_A
+		);
+	}
+
+	public function get_quarantine_items( $status = 'quarantined', $limit = 50, $offset = 0 ) {
+		global $wpdb;
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM {$this->quarantine_table()} WHERE status = %s ORDER BY id DESC LIMIT %d OFFSET %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$status,
+				max( 1, (int) $limit ),
+				max( 0, (int) $offset )
+			),
+			ARRAY_A
+		);
+	}
+
+	public function count_quarantine_items( $status = 'quarantined' ) {
+		global $wpdb;
+		return (int) $wpdb->get_var(
+			$wpdb->prepare( "SELECT COUNT(*) FROM {$this->quarantine_table()} WHERE status = %s", $status ) // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		);
+	}
+
+	public function set_quarantine_status( $id, $status, $reviewed_by ) {
+		global $wpdb;
+		$wpdb->update(
+			$this->quarantine_table(),
+			array(
+				'status'      => $status,
+				'reviewed_by' => $reviewed_by,
+				'reviewed_at' => current_time( 'mysql' ),
+			),
+			array( 'id' => $id ),
+			array( '%s', '%d', '%s' ),
+			array( '%d' )
+		);
 	}
 }

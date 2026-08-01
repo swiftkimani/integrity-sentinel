@@ -1,48 +1,303 @@
-.is-wrap { max-width: 1100px; }
+:root {
+	--is-radius: 14px;
+	--is-radius-lg: 24px;
+	--is-border: rgba(148, 163, 184, 0.28);
+	--is-muted: #64748b;
+	--is-bg-card: rgba(255, 255, 255, 0.7);
+	--is-bg-page: #f1f0fb;
+	--is-ink: #0f172a;
+
+	/* Palette: indigo -> violet -> fuchsia -> cyan, the "liquid glass" gradient family */
+	--is-indigo: #6366f1;
+	--is-indigo-dark: #4338ca;
+	--is-violet: #8b5cf6;
+	--is-fuchsia: #ec4899;
+	--is-cyan: #06b6d4;
+	--is-gradient: linear-gradient(135deg, var(--is-indigo) 0%, var(--is-violet) 55%, var(--is-fuchsia) 100%);
+
+	--is-blue: var(--is-indigo);
+	--is-blue-dark: var(--is-indigo-dark);
+	--is-critical: #dc2626;
+	--is-high: #f43f5e;
+	--is-medium: #f59e0b;
+	--is-low: var(--is-indigo);
+	--is-ok: #10b981;
+
+	--is-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	--is-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+	--is-shadow-md: 0 8px 30px rgba(76, 29, 149, 0.10);
+	--is-glass-blur: blur(20px) saturate(180%);
+}
+
+.is-wrap { max-width: 1200px; font-family: var(--is-font); }
+
+.is-wrap h1 {
+	font-size: 1.7em;
+	font-weight: 800;
+	letter-spacing: -0.02em;
+	margin-bottom: 4px;
+	background: var(--is-gradient);
+	background-clip: text;
+	-webkit-background-clip: text;
+	-webkit-text-fill-color: transparent;
+	color: var(--is-ink); /* fallback if background-clip: text isn't supported */
+	display: inline-block;
+}
+
+.is-wrap h2 {
+	margin-top: 2em;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	color: var(--is-ink);
+}
+
+.is-wrap > p.description:first-of-type { color: var(--is-muted); max-width: 70ch; }
+
+/* ------------------------------------------------------------------ */
+/* App shell: left sidebar + content pane, liquid-glass style          */
+/* ------------------------------------------------------------------ */
+
+#wpbody-content { padding-bottom: 0; }
+
+.is-shell {
+	display: flex;
+	align-items: flex-start;
+	gap: 0;
+	margin: 8px 20px 0 0;
+	border-radius: var(--is-radius-lg);
+	border: 1px solid var(--is-border);
+	box-shadow: var(--is-shadow-md);
+	font-family: var(--is-font);
+	position: relative;
+	isolation: isolate;
+
+	/* The "liquid" backdrop: soft blurred colour blobs behind glass
+	   panels. Deliberately NOT clipped with overflow:hidden -- that
+	   would also break position:sticky on the sidebar below, since an
+	   overflow-hidden ancestor becomes sticky's containing block.
+	   Rounded corners are handled per-child (nav/content) instead. */
+	background:
+		radial-gradient(1100px circle at -5% -15%, rgba(99, 102, 241, 0.22), transparent 45%),
+		radial-gradient(900px circle at 105% -10%, rgba(236, 72, 153, 0.16), transparent 42%),
+		radial-gradient(900px circle at 100% 105%, rgba(6, 182, 212, 0.16), transparent 45%),
+		radial-gradient(1000px circle at -5% 105%, rgba(139, 92, 246, 0.18), transparent 45%),
+		var(--is-bg-page);
+}
+
+.is-shell-nav {
+	flex: 0 0 236px;
+	background: linear-gradient(190deg, rgba(15, 23, 42, 0.93) 0%, rgba(24, 20, 51, 0.93) 100%);
+	backdrop-filter: var(--is-glass-blur);
+	-webkit-backdrop-filter: var(--is-glass-blur);
+	color: #cbd5e1;
+	padding: 20px 14px;
+	box-sizing: border-box;
+	border-radius: var(--is-radius-lg) 0 0 var(--is-radius-lg);
+	border-right: 1px solid rgba(255, 255, 255, 0.06);
+
+	/* Genuinely sticky: sticks to just below WP's fixed 32px admin bar
+	   and scrolls its own nav list internally if it's ever taller than
+	   the viewport, rather than pushing content around. */
+	position: sticky;
+	top: 32px;
+	align-self: flex-start;
+	max-height: calc(100vh - 32px);
+	overflow-y: auto;
+}
+
+.is-shell-brand {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 10px 20px;
+	color: #fff;
+}
+
+.is-shell-logo { font-size: 20px; color: #a5b4fc; }
+.is-shell-logo.dashicons { width: 20px; height: 20px; font-size: 20px; }
+
+.is-shell-title { font-weight: 700; font-size: 14px; letter-spacing: -0.01em; }
+
+.is-shell-nav-list { list-style: none; margin: 0; padding: 0; }
+
+.is-shell-nav-link {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 9px 12px;
+	margin-bottom: 2px;
+	border-radius: 10px;
+	color: #cbd5e1;
+	text-decoration: none;
+	font-size: 13px;
+	font-weight: 500;
+	transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.is-shell-nav-link .dashicons { font-size: 17px; width: 17px; height: 17px; opacity: 0.75; }
+
+.is-shell-nav-link:hover,
+.is-shell-nav-link:focus {
+	background: rgba(255, 255, 255, 0.08);
+	color: #fff;
+}
+
+.is-shell-nav-link.is-active {
+	background: var(--is-gradient);
+	color: #fff;
+	box-shadow: 0 4px 18px rgba(139, 92, 246, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+	transform: translateX(1px);
+}
+
+.is-shell-nav-link.is-active .dashicons { opacity: 1; }
+
+.is-shell-version {
+	margin-top: 18px;
+	padding: 10px 12px 0;
+	border-top: 1px solid rgba(255, 255, 255, 0.08);
+	color: #64748b;
+	font-size: 11px;
+}
+
+.is-shell-content {
+	flex: 1;
+	min-width: 0;
+	padding: 28px 32px 40px;
+	box-sizing: border-box;
+	border-radius: 0 var(--is-radius-lg) var(--is-radius-lg) 0;
+}
+
+.is-shell-content .is-wrap { max-width: 100%; margin: 0; }
+
+/* ------------------------------------------------------------------ */
+/* Glass panels: the frosted-glass look every card/table/form floats   */
+/* on top of the liquid backdrop with. Kept readable on purpose -- a   */
+/* security tool needs its data legible first, pretty second, so the   */
+/* blur/opacity here is tuned for contrast, not maximum transparency.  */
+/* ------------------------------------------------------------------ */
+
+.is-glass {
+	background: var(--is-bg-card);
+	backdrop-filter: var(--is-glass-blur);
+	-webkit-backdrop-filter: var(--is-glass-blur);
+	border: 1px solid rgba(255, 255, 255, 0.6);
+	box-shadow: var(--is-shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* ------------------------------------------------------------------ */
+/* Severity cards (Dashboard)                                          */
+/* ------------------------------------------------------------------ */
 
 .is-cards {
-	display: flex;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 	gap: 16px;
 	margin: 20px 0;
 }
 
 .is-card {
-	flex: 1;
-	background: #fff;
-	border: 1px solid #dcdcde;
+	background: var(--is-bg-card);
+	backdrop-filter: var(--is-glass-blur);
+	-webkit-backdrop-filter: var(--is-glass-blur);
+	border: 1px solid rgba(255, 255, 255, 0.6);
 	border-left-width: 4px;
-	border-radius: 4px;
+	border-radius: var(--is-radius);
 	padding: 16px 20px;
 	display: flex;
 	flex-direction: column;
+	box-shadow: var(--is-shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+	transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.is-card:hover {
+	transform: translateY(-2px);
+	box-shadow: var(--is-shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
 .is-card-count { font-size: 2em; font-weight: 600; line-height: 1; }
-.is-card-label { color: #646970; margin-top: 4px; }
+.is-card-label { color: var(--is-muted); margin-top: 4px; }
 
-.is-card-critical { border-left-color: #b32d2e; }
-.is-card-high     { border-left-color: #d63638; }
-.is-card-medium   { border-left-color: #dba617; }
-.is-card-low      { border-left-color: #2271b1; }
+.is-card-critical { border-left-color: var(--is-critical); }
+.is-card-high     { border-left-color: var(--is-high); }
+.is-card-medium   { border-left-color: var(--is-medium); }
+.is-card-low      { border-left-color: var(--is-low); }
+
+/* ------------------------------------------------------------------ */
+/* Security status grid (Dashboard "at a glance")                      */
+/* ------------------------------------------------------------------ */
+
+.is-status-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+	gap: 10px;
+	margin: 16px 0 28px;
+}
+
+.is-status-item {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	align-items: center;
+	gap: 4px 10px;
+	background: var(--is-bg-card);
+	backdrop-filter: var(--is-glass-blur);
+	-webkit-backdrop-filter: var(--is-glass-blur);
+	border: 1px solid rgba(255, 255, 255, 0.6);
+	border-radius: var(--is-radius);
+	padding: 10px 14px;
+	text-decoration: none;
+	color: inherit;
+	transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.is-status-item:hover,
+.is-status-item:focus {
+	box-shadow: var(--is-shadow-md);
+	transform: translateY(-2px);
+	color: inherit;
+}
+
+.is-status-dot {
+	grid-row: span 2;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background: var(--is-medium);
+	box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);
+}
+
+.is-status-ok .is-status-dot { background: var(--is-ok); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.18); }
+.is-status-warn .is-status-dot { background: var(--is-medium); box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18); }
+
+.is-status-label { font-weight: 600; font-size: 0.95em; }
+.is-status-value { grid-column: 2; color: var(--is-muted); font-size: 0.88em; }
+
+/* ------------------------------------------------------------------ */
+/* Scan progress                                                       */
+/* ------------------------------------------------------------------ */
 
 .is-progress-wrap { max-width: 500px; margin: 16px 0; }
 
 .is-progress-bar {
-	background: #f0f0f1;
-	border: 1px solid #dcdcde;
-	border-radius: 4px;
+	background: rgba(148, 163, 184, 0.18);
+	border: 1px solid var(--is-border);
+	border-radius: var(--is-radius);
 	height: 20px;
 	overflow: hidden;
 }
 
 .is-progress-fill {
-	background: #2271b1;
+	background: var(--is-gradient);
 	height: 100%;
 	width: 0%;
 	transition: width 0.3s ease;
+	box-shadow: 0 0 12px rgba(139, 92, 246, 0.5);
 }
 
 .is-explainer li { margin-bottom: 4px; }
+
+/* ------------------------------------------------------------------ */
+/* Badges                                                               */
+/* ------------------------------------------------------------------ */
 
 .is-badge {
 	display: inline-block;
@@ -51,32 +306,44 @@
 	font-size: 0.85em;
 	font-weight: 600;
 	color: #fff;
+	white-space: nowrap;
 }
 
-.is-badge-critical { background: #b32d2e; }
-.is-badge-high      { background: #d63638; }
-.is-badge-medium    { background: #dba617; color: #1d2327; }
-.is-badge-low       { background: #2271b1; }
-.is-badge-info      { background: #646970; }
+.is-badge-critical { background: linear-gradient(135deg, #dc2626, #f43f5e); }
+.is-badge-high      { background: linear-gradient(135deg, #f43f5e, #f59e0b); }
+.is-badge-medium    { background: var(--is-medium); color: #1d2327; }
+.is-badge-low       { background: var(--is-gradient); }
+.is-badge-info      { background: var(--is-muted); }
+
+/* ------------------------------------------------------------------ */
+/* Modal                                                                */
+/* ------------------------------------------------------------------ */
 
 .is-modal {
 	position: fixed;
 	top: 0; left: 0; right: 0; bottom: 0;
-	background: rgba(0,0,0,0.5);
+	background: rgba(15, 12, 41, 0.55);
+	backdrop-filter: blur(4px);
+	-webkit-backdrop-filter: blur(4px);
 	z-index: 100000;
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	padding: 16px;
 }
 
 .is-modal-content {
-	background: #fff;
+	background: rgba(255, 255, 255, 0.85);
+	backdrop-filter: var(--is-glass-blur);
+	-webkit-backdrop-filter: var(--is-glass-blur);
+	border: 1px solid rgba(255, 255, 255, 0.7);
 	max-width: 640px;
-	width: 90%;
+	width: 100%;
 	max-height: 80vh;
 	overflow-y: auto;
 	padding: 24px;
-	border-radius: 6px;
+	border-radius: var(--is-radius-lg);
+	box-shadow: 0 20px 60px rgba(76, 29, 149, 0.35);
 	position: relative;
 }
 
@@ -88,6 +355,7 @@
 	border: none;
 	font-size: 1.5em;
 	cursor: pointer;
+	line-height: 1;
 }
 
 .is-modal-content pre {
@@ -96,4 +364,134 @@
 	overflow-x: auto;
 	white-space: pre-wrap;
 	word-break: break-word;
+}
+
+/* ------------------------------------------------------------------ */
+/* Checkboxes: a small, dependency-free visual upgrade over the plain   */
+/* browser default -- accent-color is supported by every browser this  */
+/* plugin's WP 6.0+/PHP 7.4+ baseline realistically runs behind, no    */
+/* markup changes needed anywhere a checkbox already exists.           */
+/* ------------------------------------------------------------------ */
+
+.is-wrap input[type="checkbox"] {
+	accent-color: var(--is-blue);
+	width: 18px;
+	height: 18px;
+	vertical-align: middle;
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons: rebrand WP's default admin blue to this plugin's indigo    */
+/* accent inside the shell only -- everywhere else in wp-admin keeps   */
+/* WP's own button styling untouched.                                  */
+/* ------------------------------------------------------------------ */
+
+.is-shell-content .button-primary {
+	background: var(--is-gradient);
+	border-color: transparent;
+	box-shadow: 0 4px 14px rgba(139, 92, 246, 0.35);
+	border-radius: 8px;
+	transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.is-shell-content .button-primary:hover,
+.is-shell-content .button-primary:focus {
+	background: var(--is-gradient);
+	border-color: transparent;
+	box-shadow: 0 6px 20px rgba(139, 92, 246, 0.5);
+	transform: translateY(-1px);
+}
+
+.is-shell-content .button:not(.button-primary),
+.is-shell-content .button-secondary {
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.6);
+	backdrop-filter: var(--is-glass-blur);
+	-webkit-backdrop-filter: var(--is-glass-blur);
+}
+
+.is-shell-content table.widefat,
+.is-shell-content table.form-table {
+	background: var(--is-bg-card);
+	backdrop-filter: var(--is-glass-blur);
+	-webkit-backdrop-filter: var(--is-glass-blur);
+	border-radius: var(--is-radius);
+}
+
+.is-shell-content table.widefat { border: 1px solid rgba(255, 255, 255, 0.6); box-shadow: var(--is-shadow-sm); }
+
+.is-shell-content table.widefat thead th { background: rgba(148, 163, 184, 0.12); }
+
+/* ------------------------------------------------------------------ */
+/* Responsive: same breakpoint WP admin itself collapses the menu at,  */
+/* so this lines up with behavior admins already expect.               */
+/* ------------------------------------------------------------------ */
+
+@media screen and (max-width: 782px) {
+	/* Data tables (Findings, Audit Log, Quarantine, ...) scroll instead
+	   of squeezing columns unreadably narrow. form-table is deliberately
+	   left alone here -- WP core's own admin CSS already stacks it
+	   responsively, and overriding that would fight core's behavior
+	   rather than complement it. */
+	.is-wrap table.widefat {
+		display: block;
+		overflow-x: auto;
+		white-space: nowrap;
+	}
+
+	.is-wrap table.widefat thead,
+	.is-wrap table.widefat tbody,
+	.is-wrap table.widefat tr,
+	.is-wrap table.widefat th,
+	.is-wrap table.widefat td {
+		white-space: normal;
+	}
+
+	.is-cards,
+	.is-status-grid {
+		grid-template-columns: 1fr 1fr;
+	}
+
+	.is-modal-content { padding: 16px; }
+
+	/* The shell itself: sidebar becomes a horizontal scrolling tab strip
+	   above the content instead of a fixed-width side column, so it
+	   never eats into the (already limited) width available on a phone. */
+	.is-shell {
+		flex-direction: column;
+		margin-right: 12px;
+		min-height: 0;
+	}
+
+	.is-shell-nav {
+		flex: none;
+		width: 100%;
+		min-height: 0;
+		position: static;
+		padding: 12px;
+		box-sizing: border-box;
+	}
+
+	.is-shell-nav-list {
+		display: flex;
+		gap: 4px;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		padding-bottom: 2px;
+	}
+
+	.is-shell-nav-list li { flex: none; }
+
+	.is-shell-nav-link { white-space: nowrap; }
+
+	.is-shell-version { display: none; }
+
+	.is-shell-content { padding: 20px 16px 32px; }
+}
+
+@media screen and (max-width: 480px) {
+	.is-cards,
+	.is-status-grid {
+		grid-template-columns: 1fr;
+	}
 }

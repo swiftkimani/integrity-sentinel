@@ -4,7 +4,7 @@ Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.19.0
+Stable tag: 1.20.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -189,6 +189,25 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.20.0 =
+* Fixed: the Media Library picker (logo and hero image) could silently
+  fail to respond to clicks if its script hadn't finished loading yet
+  when the page first rendered. It now checks at click time instead of
+  page-load time, so it always works regardless of load order.
+* Improved: the real-preview button now surfaces the actual failure
+  reason (in the browser console and on-screen) instead of a generic
+  message if something goes wrong, making any future issue diagnosable.
+* New: three more split-screen templates — Forest, Monochrome, and
+  Ocean — alongside Sunrise, Aurora Night, Bubblegum, and Minimal (7
+  total).
+* New: hero panel placement — left or right — so the artwork and the
+  sign-in form can trade sides.
+* New: an explicit "Hide WordPress branding" checkbox (on by default)
+  instead of the behavior being silent/automatic — turn it off to
+  restore the stock WordPress logo and page title.
+* Improved: a finer responsive breakpoint for small phones, tightening
+  card padding instead of just inheriting the tablet layout.
 
 = 1.19.0 =
 * New: Login Design templates reworked as "split-screen" layouts —

@@ -495,14 +495,18 @@ class IS_Admin {
 			$hero_image = '';
 		}
 
+		$hero_position = isset( $input['hero_position'] ) && 'right' === $input['hero_position'] ? 'right' : 'left';
+
 		return array(
 			'template'        => $template,
 			'logo_url'        => $logo,
 			'primary_color'   => $color,
 			'border_radius'   => IS_Login_Design::clamp_radius( isset( $input['border_radius'] ) ? $input['border_radius'] : $defaults['border_radius'] ),
+			'hero_position'   => $hero_position,
 			'hero_heading'    => isset( $input['hero_heading'] ) ? sanitize_text_field( $input['hero_heading'] ) : '',
 			'hero_subheading' => isset( $input['hero_subheading'] ) ? sanitize_text_field( $input['hero_subheading'] ) : '',
 			'hero_image_url'  => $hero_image,
+			'hide_branding'   => empty( $input['hide_branding'] ) ? 0 : 1,
 			'custom_css'      => IS_Login_Design::sanitize_css_for_style_tag( isset( $input['custom_css'] ) ? (string) $input['custom_css'] : '' ),
 			'custom_html'     => isset( $input['custom_html'] ) ? wp_kses_post( $input['custom_html'] ) : '',
 		);
@@ -1880,10 +1884,18 @@ class IS_Admin {
 							</label>
 						<?php endforeach; ?>
 					</div>
-					<p class="description"><?php esc_html_e( '"Minimal" is a plain centered card. The other three add a decorative image panel down one side — heading, subheading and artwork are all yours to set below.', 'integrity-sentinel' ); ?></p>
+					<p class="description"><?php esc_html_e( '"Minimal" is a plain centered card. Every other template adds a decorative image panel down one side — heading, subheading, artwork, and which side it goes on are all yours to set below.', 'integrity-sentinel' ); ?></p>
 
 					<h2><?php esc_html_e( 'Hero panel', 'integrity-sentinel' ); ?></h2>
 					<table class="form-table" role="presentation" id="is-hero-fields">
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Placement', 'integrity-sentinel' ); ?></th>
+							<td>
+								<label style="margin-right:16px;"><input type="radio" name="is_login_design_settings[hero_position]" value="left" id="is-hero-position-left" <?php checked( $design['hero_position'], 'left' ); ?>> <?php esc_html_e( 'Left', 'integrity-sentinel' ); ?></label>
+								<label><input type="radio" name="is_login_design_settings[hero_position]" value="right" id="is-hero-position-right" <?php checked( $design['hero_position'], 'right' ); ?>> <?php esc_html_e( 'Right', 'integrity-sentinel' ); ?></label>
+								<p class="description"><?php esc_html_e( 'Which side the artwork sits on; the sign-in form takes the other side.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
 						<tr>
 							<th scope="row"><label for="is-hero-heading"><?php esc_html_e( 'Heading', 'integrity-sentinel' ); ?></label></th>
 							<td><input type="text" id="is-hero-heading" name="is_login_design_settings[hero_heading]" value="<?php echo esc_attr( $design['hero_heading'] ); ?>" class="regular-text" placeholder="Welcome back"></td>
@@ -1909,6 +1921,16 @@ class IS_Admin {
 					<h2><?php esc_html_e( 'Customize', 'integrity-sentinel' ); ?></h2>
 					<table class="form-table" role="presentation">
 						<tr>
+							<th scope="row"><?php esc_html_e( 'WordPress branding', 'integrity-sentinel' ); ?></th>
+							<td>
+								<label>
+									<input type="checkbox" id="is-hide-branding" name="is_login_design_settings[hide_branding]" value="1" <?php checked( ! empty( $design['hide_branding'] ) ); ?>>
+									<?php esc_html_e( 'Hide it — use my site name/homepage instead of the default WordPress logo, link, and page title.', 'integrity-sentinel' ); ?>
+								</label>
+								<p class="description"><?php esc_html_e( 'On by default. Turn off to restore the stock WordPress logo and title.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr>
 							<th scope="row"><label for="is-login-color"><?php esc_html_e( 'Accent color', 'integrity-sentinel' ); ?></label></th>
 							<td>
 								<input type="color" id="is-login-color" name="is_login_design_settings[primary_color]" value="<?php echo esc_attr( $design['primary_color'] ); ?>">
@@ -1931,7 +1953,7 @@ class IS_Admin {
 									<button type="button" class="button" id="is-login-logo-pick"><?php esc_html_e( 'Choose from Media Library', 'integrity-sentinel' ); ?></button>
 									<button type="button" class="button-link" id="is-login-logo-clear" style="<?php echo '' === $design['logo_url'] ? 'display:none;' : ''; ?>"><?php esc_html_e( 'Remove', 'integrity-sentinel' ); ?></button>
 								</div>
-								<p class="description"><?php esc_html_e( 'Shown as text (your site name) until you set one — there\'s no default logo mark on this page either way.', 'integrity-sentinel' ); ?></p>
+								<p class="description"><?php esc_html_e( 'Shown as text (your site name) until you set one, while branding is hidden above.', 'integrity-sentinel' ); ?></p>
 							</td>
 						</tr>
 						<tr>
@@ -1959,7 +1981,7 @@ class IS_Admin {
 				<div class="is-login-preview-pane">
 					<h2><?php esc_html_e( 'Instant preview', 'integrity-sentinel' ); ?></h2>
 					<p class="description"><?php esc_html_e( 'Updates as you type — a stand-in, not the real page. Use "Open real preview" above to see it rendered for real, unsaved.', 'integrity-sentinel' ); ?></p>
-					<div class="is-login-preview" id="is-login-preview" data-template="<?php echo esc_attr( $design['template'] ); ?>" style="--is-login-color:<?php echo esc_attr( $design['primary_color'] ); ?>;--is-login-radius:<?php echo esc_attr( (int) $design['border_radius'] ); ?>px;">
+					<div class="is-login-preview" id="is-login-preview" data-template="<?php echo esc_attr( $design['template'] ); ?>" data-position="<?php echo esc_attr( $design['hero_position'] ); ?>" style="--is-login-color:<?php echo esc_attr( $design['primary_color'] ); ?>;--is-login-radius:<?php echo esc_attr( (int) $design['border_radius'] ); ?>px;">
 						<div class="is-login-preview-hero" id="is-login-preview-hero">
 							<span class="is-login-preview-blob is-login-preview-blob-1"></span>
 							<span class="is-login-preview-blob is-login-preview-blob-2"></span>

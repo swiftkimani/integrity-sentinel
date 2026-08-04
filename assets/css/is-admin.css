@@ -423,6 +423,188 @@
 .is-shell-content table.widefat thead th { background: rgba(148, 163, 184, 0.12); }
 
 /* ------------------------------------------------------------------ */
+/* Login Design: template picker + live preview                       */
+/* ------------------------------------------------------------------ */
+
+.is-login-design-layout {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 300px;
+	gap: 32px;
+	align-items: start;
+	margin-top: 16px;
+}
+
+.is-template-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+	gap: 12px;
+	margin: 12px 0 24px;
+}
+
+.is-template-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	padding: 10px;
+	border-radius: var(--is-radius);
+	border: 2px solid var(--is-border);
+	background: var(--is-bg-card);
+	cursor: pointer;
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.is-template-card input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
+
+.is-template-card.is-selected,
+.is-template-card:has(input:checked) {
+	border-color: var(--is-indigo);
+	box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+
+.is-template-swatch {
+	display: flex;
+	width: 100%;
+	height: 64px;
+	border-radius: calc(var(--is-radius) * 0.6);
+	overflow: hidden;
+	border: 1px solid var(--is-border);
+}
+
+.is-template-swatch-hero { flex: 0 0 42%; }
+.is-template-swatch-card { flex: 1; background: #fff; }
+
+.is-template-label { font-size: 12px; font-weight: 600; color: var(--is-ink); }
+
+/* Minimal: no hero half, just a plain card fill */
+.is-tpl-minimal .is-template-swatch-hero { display: none; }
+.is-tpl-minimal .is-template-swatch-card { background: #f8fafc; }
+
+.is-tpl-sunrise .is-template-swatch-hero {
+	background: linear-gradient(160deg, #fb923c 0%, #f43f5e 55%, #7c3aed 100%);
+}
+.is-tpl-aurora-night .is-template-swatch-hero {
+	background: linear-gradient(160deg, #0b0f2b 0%, #302b63 55%, #1c1440 100%);
+}
+.is-tpl-bubblegum .is-template-swatch-hero {
+	background: linear-gradient(150deg, #f9a8d4 0%, #c084fc 60%, #fbcfe8 100%);
+}
+
+.is-login-preview-pane { position: sticky; top: 48px; }
+
+.is-login-preview {
+	position: relative;
+	border-radius: var(--is-radius-lg);
+	min-height: 260px;
+	overflow: hidden;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	padding: 20px;
+	box-sizing: border-box;
+	background: #f8fafc;
+}
+
+.is-login-preview-hero {
+	position: absolute;
+	inset: 0;
+	width: 46%;
+	overflow: hidden;
+	display: flex;
+	align-items: flex-end;
+	padding: 18px;
+	box-sizing: border-box;
+	background: linear-gradient(160deg, color-mix(in srgb, var(--is-login-color, #6366f1) 55%, #fb923c) 0%, color-mix(in srgb, var(--is-login-color, #6366f1) 55%, #f43f5e) 55%, color-mix(in srgb, var(--is-login-color, #6366f1) 70%, #7c3aed) 100%);
+}
+
+.is-login-preview[data-template="aurora-night"] .is-login-preview-hero {
+	background: linear-gradient(160deg, #0b0f2b 0%, color-mix(in srgb, var(--is-login-color, #6366f1) 40%, #302b63) 55%, #1c1440 100%);
+}
+.is-login-preview[data-template="bubblegum"] .is-login-preview-hero {
+	background: linear-gradient(150deg, color-mix(in srgb, var(--is-login-color, #6366f1) 50%, #f9a8d4) 0%, color-mix(in srgb, var(--is-login-color, #6366f1) 35%, #c084fc) 60%, #fbcfe8 100%);
+}
+.is-login-preview[data-template="minimal"] .is-login-preview-hero { display: none; }
+
+.is-login-preview-blob {
+	position: absolute;
+	border-radius: 50%;
+	filter: blur(10px);
+	background: rgba(255, 255, 255, 0.4);
+	pointer-events: none;
+}
+.is-login-preview-blob-1 { width: 60px; height: 60px; top: -10px; right: -10px; }
+.is-login-preview-blob-2 { width: 80px; height: 80px; bottom: -20px; left: -15px; background: rgba(0, 0, 0, 0.12); }
+
+.is-login-preview-hero-copy {
+	position: relative;
+	z-index: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	color: #fff;
+}
+.is-login-preview-hero-copy strong { font-size: 13px; font-weight: 800; line-height: 1.2; }
+.is-login-preview-hero-copy span { font-size: 10px; opacity: 0.85; line-height: 1.3; }
+.is-login-preview-hero-copy strong:empty,
+.is-login-preview-hero-copy span:empty { display: none; }
+
+.is-login-preview-card {
+	position: relative;
+	z-index: 2;
+	width: 100%;
+	max-width: 200px;
+	background: #fff;
+	border-radius: var(--is-login-radius, 14px);
+	box-shadow: var(--is-shadow-md);
+	padding: 18px 14px;
+	box-sizing: border-box;
+}
+
+.is-login-preview[data-template="minimal"] .is-login-preview-card { justify-content: center; margin: 0 auto; }
+
+.is-login-preview-logo {
+	margin-bottom: 12px;
+	color: var(--is-ink);
+	font-size: 12px;
+	font-weight: 800;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.is-login-preview-logo img { max-width: 100%; max-height: 32px; object-fit: contain; }
+
+.is-login-preview-field {
+	height: 12px;
+	border-radius: calc(var(--is-login-radius, 14px) * 0.4);
+	background: rgba(148, 163, 184, 0.25);
+	margin-bottom: 8px;
+}
+
+.is-login-preview-button {
+	margin-top: 4px;
+	height: 28px;
+	border-radius: calc(var(--is-login-radius, 14px) * 0.4);
+	background: var(--is-login-color, var(--is-indigo));
+	color: #fff;
+	font-size: 11px;
+	font-weight: 700;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.is-logo-picker { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.is-logo-picker img { max-height: 40px; max-width: 120px; object-fit: contain; border-radius: 6px; }
+
+#is-hero-fields { transition: opacity 0.15s ease; }
+
+@media screen and (max-width: 960px) {
+	.is-login-design-layout { grid-template-columns: 1fr; }
+	.is-login-preview-pane { position: static; }
+}
+
+/* ------------------------------------------------------------------ */
 /* Responsive: same breakpoint WP admin itself collapses the menu at,  */
 /* so this lines up with behavior admins already expect.               */
 /* ------------------------------------------------------------------ */

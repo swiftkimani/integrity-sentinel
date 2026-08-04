@@ -1,9 +1,9 @@
 {
-    "assets/css/is-admin.css": "49af3f8823b061e83a2c478b7258cb41f12147c21eec3463f2f59eac29867819",
-    "assets/js/is-admin.js": "2000ce0dbae0ec7d929d1cac95b0aa24270221b23852f730e9ea032900051239",
+    "assets/css/is-admin.css": "ca99ee08f10dc553276b38b3b11ce7e6ad8a0e65a74122902fe1620f4a8d7447",
+    "assets/js/is-admin.js": "7fc0ef4131b73e6f1d6c2f37eaf8a14c83c891b3591494eaef087e9c3e6fdafe",
     "includes/class-is-2fa.php": "1a8cd2a4440c2c2bf8a541f5f7a3a3122b57e4fb8a6715f054f7e8fbe8d000e8",
-    "includes/class-is-admin.php": "8a59eceb37c2dcbc4fe65b76ba658b846e857d3d73a7e91fc4732ccf9acb46ef",
-    "includes/class-is-ajax.php": "6eb4d0157ec226187d02fea4098c3afd9a189ec834acf529c72169069e4bf496",
+    "includes/class-is-admin.php": "1ce58b3fa7e7a43818664f0b3bf106514745089ba5b762ab9fd2c93f564c8807",
+    "includes/class-is-ajax.php": "a99df7713c60ae99bcfeae62a28c53073eb38ab493fa53615e7c6ac22a24acb6",
     "includes/class-is-audit-log.php": "26a043fab8f92c25e905f7404b5d1d7f8edd7251205ffa8fc6cca5de84eb14bf",
     "includes/class-is-bot-block.php": "c2455037b3b93c7b78fa0ad764a445d1102118807736bb17f947c08d3842e687",
     "includes/class-is-cli.php": "f5a4d4e77fb940f245ab2e644b9cce0ca30a003aa96f2a416c0cfe8f6c7096d2",
@@ -17,7 +17,8 @@
     "includes/class-is-heuristics.php": "78854f4483ce1f3cb08b9d643f8d435612843a3828292d65f5ce2ce4d988bfdc",
     "includes/class-is-hotlink.php": "bef7fcbeb5a325fed168d3793d822b414ca2dc9269c9c38fe1c804af0034db1d",
     "includes/class-is-ip-list.php": "7b7617082db0d651ec86bb931ed6844eaf0a701419fd2e37ff1ec20f93fe9bcc",
-    "includes/class-is-login.php": "973306c46075b40ce00151322fafa8ed33ec626ac534bac697ca34aa358b33ea",
+    "includes/class-is-login-design.php": "259936a5e08b78f288ee927111f858c68ed9335d28eb91d76ebde6552bc1287c",
+    "includes/class-is-login.php": "88543d7308809e89170cd4c55180c0862d96790a400d64c40ef771c804f5dab6",
     "includes/class-is-notifications.php": "4fe06aeedfd77272df788773fe255916a8685689cc80d782248298388fe2e972",
     "includes/class-is-plugin-checksums.php": "b2e17087084782ad087c7c5f6d79a31ccf1ac32e8a079d2713bdd22a455e8026",
     "includes/class-is-quarantine.php": "40663fc6ad2b3c8f5f38f964ab43961a6dc330b1da5d2ed29391fee1f931c601",
@@ -27,6 +28,6 @@
     "includes/class-is-totp.php": "ffb38a4812f033ab7de73d75f4bbdfb309ca05e77e6d465ec7a11c2fc5868d87",
     "includes/class-is-update-monitor.php": "3af2c1a01eff230f4f35e7069a3a50a106a20a84c7bdba1982d2364074fc52ff",
     "includes/class-is-upload-guard.php": "c0c98e530442494c5fef1f22a98041995e79dec41b672815bc71074f61cd69c9",
-    "integrity-sentinel.php": "2927b30a04a34e8205e268ecdd7608058a99a3c4923e07f8b309bf1ca56d886c",
+    "integrity-sentinel.php": "c02e8b7114329c4d675754289a9b92725ddc9ea12e2649343875ae63ce9a2e61",
     "uninstall.php": "31fd5d17ba898b944761a5c33c8a7c60336f412c87860d08d40bbe0a2950e6b3"
 }

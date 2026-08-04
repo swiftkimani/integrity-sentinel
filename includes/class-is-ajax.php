@@ -30,6 +30,7 @@ class IS_Ajax {
 		add_action( 'wp_ajax_is_scan_status', array( $this, 'scan_status' ) );
 		add_action( 'wp_ajax_is_set_finding_status', array( $this, 'set_finding_status' ) );
 		add_action( 'wp_ajax_is_view_finding', array( $this, 'view_finding' ) );
+		add_action( 'wp_ajax_is_preview_login_design', array( $this, 'preview_login_design' ) );
 	}
 
 	private function guard() {
@@ -141,5 +142,25 @@ class IS_Ajax {
 				'last_seen'  => $finding['last_seen'],
 			)
 		);
+	}
+
+	/**
+	 * Stores a short-lived, per-admin draft of in-progress Login Design
+	 * edits so the settings page can open a real preview of wp-login.php
+	 * without saving anything yet. Runs the exact same sanitizer the real
+	 * save path uses (IS_Admin::sanitize_login_design_input()), so a
+	 * preview can never render anything a genuine save wouldn't also
+	 * allow -- see IS_Login_Design::preview_override().
+	 */
+	public function preview_login_design() {
+		$this->guard();
+		// Same field name/shape the real settings form posts to options.php
+		// with, so the JS can hand over a FormData(form) of the in-progress
+		// (possibly unsaved) fields verbatim -- see initLoginDesignPreview()
+		// in is-admin.js.
+		$raw = isset( $_POST['is_login_design_settings'] ) && is_array( $_POST['is_login_design_settings'] ) ? wp_unslash( $_POST['is_login_design_settings'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitize_login_design_input() below is the sanitizer
+		$draft = IS_Admin::instance()->sanitize_login_design_input( $raw, IS_Login_Design::settings() );
+		IS_Login_Design::store_preview( $draft );
+		wp_send_json_success( array( 'preview_url' => add_query_arg( 'is_preview', '1', wp_login_url() ) ) );
 	}
 }

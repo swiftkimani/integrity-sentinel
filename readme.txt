@@ -4,7 +4,7 @@ Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.17.0
+Stable tag: 1.19.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -189,6 +189,48 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.19.0 =
+* New: Login Design templates reworked as "split-screen" layouts —
+  three built-in designs (Sunrise, Aurora Night, Bubblegum) with a
+  decorative hero panel (heading, subheading, and either a generated
+  pattern or your own uploaded photo/illustration) beside the sign-in
+  card, plus a plain Minimal option. Colors, logo, corner roundness,
+  custom CSS, and a custom HTML banner all still apply on top.
+* Changed: the login page no longer mentions WordPress anywhere —
+  the default logo mark, its link target, and the browser tab title
+  are always replaced with your site's own name/homepage, not just
+  when a custom logo is set.
+* New: a real, unsaved-changes preview. "Open real preview" saves your
+  in-progress edits to a short-lived per-admin draft and opens the
+  actual login page rendering them — no need to save first, and
+  nothing is written to the live settings until you click Save. A
+  smaller instant mockup on the settings page also updates as you type
+  for quick, no-network feedback.
+* Fixed: the old wp-login.php/wp-admin block returned WordPress's bare
+  `wp_die()` "Not Found" text. It's now a proper themed 404 page (matches
+  what a real 404 on the site would look like, no hint that it's a
+  security block) with a link back to the homepage and an automatic
+  redirect there after a few seconds.
+
+= 1.18.0 =
+* Fixed: hiding the login page previously only blocked wp-login.php —
+  the old default `/wp-admin/` route still worked for anyone not
+  logged in, quietly redirecting to the new login URL and confirming
+  it was hidden in the first place. It now 404s the same way
+  wp-login.php does (admin-ajax.php/admin-post.php and already
+  logged-in users are unaffected).
+* New: optional admin subdomain (e.g. `admin.example.com`) as a second
+  login entry point once DNS/your web server routes it to the same
+  site — the login form loads at that host's root, no slug in the
+  URL. Requires a custom login slug to already be set; the settings
+  page documents the `COOKIE_DOMAIN` change this needs in
+  wp-config.php.
+* New: Login Design — replaces the stock wp-login.php look with four
+  built-in templates (Refined Default, Midnight Glass, Minimal, Aurora
+  Gradient), a customizer (accent color, logo, corner roundness), a
+  custom-CSS box, and a sanitized custom-HTML banner above the form,
+  with a live preview on the settings page.
 
 = 1.17.0 =
 * New: "liquid glass" visual refresh for the app shell — frosted

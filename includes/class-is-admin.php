@@ -48,6 +48,7 @@ class IS_Admin {
 		add_submenu_page( 'integrity-sentinel', __( 'Hardening', 'integrity-sentinel' ), __( 'Hardening', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-hardening', array( $this, 'render_hardening' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Access Control', 'integrity-sentinel' ), __( 'Access Control', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-access', array( $this, 'render_access_control' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Login Security', 'integrity-sentinel' ), __( 'Login Security', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-login', array( $this, 'render_login_security' ) );
+		add_submenu_page( 'integrity-sentinel', __( 'Login Design', 'integrity-sentinel' ), __( 'Login Design', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-login-design', array( $this, 'render_login_design' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'REST API', 'integrity-sentinel' ), __( 'REST API', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-rest', array( $this, 'render_rest_api' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Audit Log', 'integrity-sentinel' ), __( 'Audit Log', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-audit', array( $this, 'render_audit_log' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Settings', 'integrity-sentinel' ), __( 'Settings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-settings', array( $this, 'render_settings' ) );
@@ -124,6 +125,12 @@ class IS_Admin {
 				'icon'  => 'dashicons-admin-users',
 			),
 			array(
+				'key'   => 'login-design',
+				'label' => __( 'Login Design', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-login-design',
+				'icon'  => 'dashicons-admin-appearance',
+			),
+			array(
 				'key'   => 'rest',
 				'label' => __( 'REST API', 'integrity-sentinel' ),
 				'slug'  => 'integrity-sentinel-rest',
@@ -191,6 +198,10 @@ class IS_Admin {
 		}
 		wp_enqueue_style( 'is-admin', IS_PLUGIN_URL . 'assets/css/is-admin.css', array(), IS_VERSION );
 		wp_enqueue_script( 'is-admin', IS_PLUGIN_URL . 'assets/js/is-admin.js', array(), IS_VERSION, true );
+
+		if ( isset( $_GET['page'] ) && 'integrity-sentinel-login-design' === $_GET['page'] ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only page-identity check, not processing input
+			wp_enqueue_media();
+		}
 		wp_localize_script(
 			'is-admin',
 			'ISAdmin',
@@ -247,6 +258,14 @@ class IS_Admin {
 			array(
 				'type'              => 'array',
 				'sanitize_callback' => array( $this, 'sanitize_login_throttle_settings' ),
+			)
+		);
+		register_setting(
+			'is_login_design_settings_group',
+			'is_login_design_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_login_design_settings' ),
 			)
 		);
 		register_setting(
@@ -403,7 +422,21 @@ class IS_Admin {
 			$slug = $old['login_slug'];
 		}
 
-		$out = array( 'login_slug' => $slug );
+		$raw_host = isset( $input['login_host'] ) ? $input['login_host'] : '';
+		$host     = IS_Login::sanitize_login_host( $raw_host );
+		if ( '' !== trim( (string) $raw_host ) && '' === $host ) {
+			add_settings_error(
+				'is_login_rename_settings',
+				'is_login_host_invalid',
+				__( 'That admin subdomain did not look like a valid hostname (e.g. admin.example.com) and was left blank.', 'integrity-sentinel' )
+			);
+		}
+
+		$out = array(
+			'login_slug' => $slug,
+			'login_host' => $host,
+		);
+
 		if ( (string) $old['login_slug'] !== (string) $out['login_slug'] ) {
 			IS_Audit_Log::record(
 				'login_slug_changed',
@@ -412,6 +445,84 @@ class IS_Admin {
 					'to'   => $out['login_slug'],
 				)
 			);
+		}
+		if ( (string) $old['login_host'] !== (string) $out['login_host'] ) {
+			IS_Audit_Log::record(
+				'login_host_changed',
+				array(
+					'from' => $old['login_host'],
+					'to'   => $out['login_host'],
+				)
+			);
+		}
+
+		return $out;
+	}
+
+	/**
+	 * The actual input -> clean-array transform, with no side effects
+	 * (no settings_errors, no audit log) -- shared by the real save path
+	 * (sanitize_login_design_settings() below, which adds those side
+	 * effects around it) and IS_Ajax::preview_login_design(), which needs
+	 * an identically-validated draft for the unsaved-changes preview
+	 * without either of those side effects firing for something that was
+	 * never actually saved.
+	 */
+	public function sanitize_login_design_input( $input, $old ) {
+		$defaults = IS_Login_Design::default_settings();
+
+		$template = isset( $input['template'] ) && array_key_exists( $input['template'], IS_Login_Design::templates() )
+			? $input['template']
+			: $defaults['template'];
+
+		$raw_color = isset( $input['primary_color'] ) ? $input['primary_color'] : '';
+		$color     = sanitize_hex_color( $raw_color );
+		if ( '' !== trim( (string) $raw_color ) && null === $color ) {
+			$color = $old['primary_color'];
+		} elseif ( null === $color ) {
+			$color = $defaults['primary_color'];
+		}
+
+		$raw_logo = isset( $input['logo_url'] ) ? trim( (string) $input['logo_url'] ) : '';
+		$logo     = '' !== $raw_logo ? esc_url_raw( $raw_logo ) : '';
+		if ( '' !== $logo && ! IS_Login_Design::is_http_url( $logo ) ) {
+			$logo = '';
+		}
+
+		$raw_hero_image = isset( $input['hero_image_url'] ) ? trim( (string) $input['hero_image_url'] ) : '';
+		$hero_image     = '' !== $raw_hero_image ? esc_url_raw( $raw_hero_image ) : '';
+		if ( '' !== $hero_image && ! IS_Login_Design::is_http_url( $hero_image ) ) {
+			$hero_image = '';
+		}
+
+		return array(
+			'template'        => $template,
+			'logo_url'        => $logo,
+			'primary_color'   => $color,
+			'border_radius'   => IS_Login_Design::clamp_radius( isset( $input['border_radius'] ) ? $input['border_radius'] : $defaults['border_radius'] ),
+			'hero_heading'    => isset( $input['hero_heading'] ) ? sanitize_text_field( $input['hero_heading'] ) : '',
+			'hero_subheading' => isset( $input['hero_subheading'] ) ? sanitize_text_field( $input['hero_subheading'] ) : '',
+			'hero_image_url'  => $hero_image,
+			'custom_css'      => IS_Login_Design::sanitize_css_for_style_tag( isset( $input['custom_css'] ) ? (string) $input['custom_css'] : '' ),
+			'custom_html'     => isset( $input['custom_html'] ) ? wp_kses_post( $input['custom_html'] ) : '',
+		);
+	}
+
+	public function sanitize_login_design_settings( $input ) {
+		$old = IS_Login_Design::settings();
+		$out = $this->sanitize_login_design_input( $input, $old );
+
+		$raw_color = isset( $input['primary_color'] ) ? $input['primary_color'] : '';
+		if ( '' !== trim( (string) $raw_color ) && null === sanitize_hex_color( $raw_color ) ) {
+			add_settings_error(
+				'is_login_design_settings',
+				'is_login_design_color_invalid',
+				__( 'That accent color was not a valid hex color (e.g. #6366f1) and was left unchanged.', 'integrity-sentinel' )
+			);
+		}
+
+		if ( $out !== $old ) {
+			IS_Audit_Log::record( 'login_design_changed', array() );
 		}
 
 		return $out;
@@ -863,8 +974,8 @@ class IS_Admin {
 			),
 			array(
 				'label' => __( 'Login URL', 'integrity-sentinel' ),
-				'ok'    => '' !== $login_rename['login_slug'],
-				'text'  => '' !== $login_rename['login_slug'] ? __( 'Hidden', 'integrity-sentinel' ) : __( 'Default', 'integrity-sentinel' ),
+				'ok'    => '' !== $login_rename['login_slug'] || '' !== $login_rename['login_host'],
+				'text'  => ( '' !== $login_rename['login_slug'] || '' !== $login_rename['login_host'] ) ? __( 'Hidden', 'integrity-sentinel' ) : __( 'Default', 'integrity-sentinel' ),
 				'url'   => $login_url,
 			),
 			array(
@@ -1637,7 +1748,32 @@ class IS_Admin {
 						<td>
 							<code><?php echo esc_html( home_url( '/' ) ); ?></code>
 							<input type="text" id="is_login_slug" name="is_login_rename_settings[login_slug]" value="<?php echo esc_attr( $rename['login_slug'] ); ?>" class="regular-text" placeholder="<?php esc_attr_e( 'leave blank to keep wp-login.php', 'integrity-sentinel' ); ?>">
-							<p class="description"><?php esc_html_e( 'When set, wp-login.php 404s for everyone and this becomes the real login URL. Leave blank to keep the default wp-login.php behavior unchanged.', 'integrity-sentinel' ); ?></p>
+							<p class="description"><?php esc_html_e( 'When set, both wp-login.php and wp-admin 404 for anyone not already logged in, and this becomes the real login URL.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_login_host"><?php esc_html_e( 'Admin subdomain (optional)', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<input type="text" id="is_login_host" name="is_login_rename_settings[login_host]" value="<?php echo esc_attr( $rename['login_host'] ); ?>" class="regular-text" placeholder="admin.example.com">
+							<p class="description">
+								<?php esc_html_e( 'Optional and independent of the slug above — works alone, together with a slug, or not at all. Once DNS/your web server routes this hostname to this same site, visiting its bare address opens the login form directly, and wp-login.php works normally there too (any action) — no slug in the URL needed.', 'integrity-sentinel' ); ?>
+							</p>
+							<?php if ( '' !== $rename['login_host'] && '' === $rename['login_slug'] ) : ?>
+								<p class="description"><?php esc_html_e( 'No slug is set, so a password-reset email link (which always points at this site\'s main address, not the subdomain) still works normally — that one specific action stays reachable everywhere. Nothing else does.', 'integrity-sentinel' ); ?></p>
+							<?php endif; ?>
+							<?php if ( '' !== $rename['login_host'] ) : ?>
+								<div class="notice notice-warning inline" style="margin:10px 0 0;">
+									<p>
+										<?php
+										printf(
+											/* translators: %s: define('COOKIE_DOMAIN', ...) snippet */
+											esc_html__( 'Important: for a session started on the subdomain to also work on your main domain\'s wp-admin, add %s to wp-config.php (the leading dot covers all subdomains). Without it, logging in on the subdomain may leave you looking logged out on the main site.', 'integrity-sentinel' ),
+											'<code>' . esc_html( "define('COOKIE_DOMAIN', '." . preg_replace( '/^[^.]+\./', '', $rename['login_host'] ) . "');" ) . '</code>'
+										);
+										?>
+									</p>
+								</div>
+							<?php endif; ?>
 						</td>
 					</tr>
 				</table>
@@ -1705,6 +1841,142 @@ class IS_Admin {
 				</table>
 				<?php submit_button( __( 'Save two-factor authentication settings', 'integrity-sentinel' ) ); ?>
 			</form>
+		</div>
+		<?php
+		$this->render_shell_close();
+	}
+
+	// -----------------------------------------------------------------
+	// Login Design
+	// -----------------------------------------------------------------
+
+	public function render_login_design() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		settings_errors( 'is_login_design_settings' );
+		$design    = IS_Login_Design::settings();
+		$templates = IS_Login_Design::templates();
+		$this->render_shell_open( 'login-design' );
+		?>
+		<div class="wrap is-wrap">
+			<h1><?php esc_html_e( 'Login Design', 'integrity-sentinel' ); ?></h1>
+			<p class="description"><?php esc_html_e( 'Replace the stock sign-in screen with one of the built-in templates, tweak it below, or drop in your own CSS/HTML. Nothing here mentions your CMS by name — the goal is a sign-in page that looks like part of your product, not a default install.', 'integrity-sentinel' ); ?></p>
+
+			<div class="is-login-design-layout">
+				<form method="post" action="options.php" class="is-login-design-form" id="is-login-design-form">
+					<?php settings_fields( 'is_login_design_settings_group' ); ?>
+
+					<h2><?php esc_html_e( 'Template', 'integrity-sentinel' ); ?></h2>
+					<div class="is-template-grid" id="is-template-grid">
+						<?php foreach ( $templates as $key => $label ) : ?>
+							<label class="is-template-card is-tpl-<?php echo esc_attr( $key ); ?><?php echo $design['template'] === $key ? ' is-selected' : ''; ?>">
+								<input type="radio" name="is_login_design_settings[template]" value="<?php echo esc_attr( $key ); ?>" data-template="<?php echo esc_attr( $key ); ?>" <?php checked( $design['template'], $key ); ?>>
+								<span class="is-template-swatch" aria-hidden="true">
+									<span class="is-template-swatch-hero"></span>
+									<span class="is-template-swatch-card"></span>
+								</span>
+								<span class="is-template-label"><?php echo esc_html( $label ); ?></span>
+							</label>
+						<?php endforeach; ?>
+					</div>
+					<p class="description"><?php esc_html_e( '"Minimal" is a plain centered card. The other three add a decorative image panel down one side — heading, subheading and artwork are all yours to set below.', 'integrity-sentinel' ); ?></p>
+
+					<h2><?php esc_html_e( 'Hero panel', 'integrity-sentinel' ); ?></h2>
+					<table class="form-table" role="presentation" id="is-hero-fields">
+						<tr>
+							<th scope="row"><label for="is-hero-heading"><?php esc_html_e( 'Heading', 'integrity-sentinel' ); ?></label></th>
+							<td><input type="text" id="is-hero-heading" name="is_login_design_settings[hero_heading]" value="<?php echo esc_attr( $design['hero_heading'] ); ?>" class="regular-text" placeholder="Welcome back"></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-hero-subheading"><?php esc_html_e( 'Subheading', 'integrity-sentinel' ); ?></label></th>
+							<td><input type="text" id="is-hero-subheading" name="is_login_design_settings[hero_subheading]" value="<?php echo esc_attr( $design['hero_subheading'] ); ?>" class="regular-text" placeholder="<?php esc_attr_e( 'e.g. Everything you need, in one place.', 'integrity-sentinel' ); ?>"></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-hero-image-url"><?php esc_html_e( 'Illustration / photo', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<div class="is-logo-picker">
+									<img id="is-hero-image-preview" src="<?php echo esc_url( $design['hero_image_url'] ); ?>" alt="" style="<?php echo '' === $design['hero_image_url'] ? 'display:none;' : ''; ?>">
+									<input type="url" id="is-hero-image-url" name="is_login_design_settings[hero_image_url]" value="<?php echo esc_attr( $design['hero_image_url'] ); ?>" class="regular-text" placeholder="https://example.com/illustration.jpg">
+									<button type="button" class="button" id="is-hero-image-pick"><?php esc_html_e( 'Choose from Media Library', 'integrity-sentinel' ); ?></button>
+									<button type="button" class="button-link" id="is-hero-image-clear" style="<?php echo '' === $design['hero_image_url'] ? 'display:none;' : ''; ?>"><?php esc_html_e( 'Remove', 'integrity-sentinel' ); ?></button>
+								</div>
+								<p class="description"><?php esc_html_e( 'Optional. Without one, a soft generated pattern is used instead — pick your own photo or illustration for something more "you".', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+					</table>
+
+					<h2><?php esc_html_e( 'Customize', 'integrity-sentinel' ); ?></h2>
+					<table class="form-table" role="presentation">
+						<tr>
+							<th scope="row"><label for="is-login-color"><?php esc_html_e( 'Accent color', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<input type="color" id="is-login-color" name="is_login_design_settings[primary_color]" value="<?php echo esc_attr( $design['primary_color'] ); ?>">
+								<p class="description"><?php esc_html_e( 'Tints the hero artwork and drives the submit button, focus rings, and links across every template.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-login-radius"><?php esc_html_e( 'Corner roundness', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<input type="range" id="is-login-radius" name="is_login_design_settings[border_radius]" min="0" max="40" step="1" value="<?php echo esc_attr( $design['border_radius'] ); ?>">
+								<output id="is-login-radius-value" for="is-login-radius"><?php echo esc_html( $design['border_radius'] ); ?>px</output>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-login-logo-url"><?php esc_html_e( 'Logo', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<div class="is-logo-picker">
+									<img id="is-login-logo-preview" src="<?php echo esc_url( $design['logo_url'] ); ?>" alt="" style="<?php echo '' === $design['logo_url'] ? 'display:none;' : ''; ?>">
+									<input type="url" id="is-login-logo-url" name="is_login_design_settings[logo_url]" value="<?php echo esc_attr( $design['logo_url'] ); ?>" class="regular-text" placeholder="https://example.com/logo.png">
+									<button type="button" class="button" id="is-login-logo-pick"><?php esc_html_e( 'Choose from Media Library', 'integrity-sentinel' ); ?></button>
+									<button type="button" class="button-link" id="is-login-logo-clear" style="<?php echo '' === $design['logo_url'] ? 'display:none;' : ''; ?>"><?php esc_html_e( 'Remove', 'integrity-sentinel' ); ?></button>
+								</div>
+								<p class="description"><?php esc_html_e( 'Shown as text (your site name) until you set one — there\'s no default logo mark on this page either way.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-login-custom-html"><?php esc_html_e( 'Custom HTML banner', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<textarea id="is-login-custom-html" name="is_login_design_settings[custom_html]" rows="3" class="large-text code" placeholder="<?php esc_attr_e( 'e.g. <p>Staff portal — authorized access only.</p>', 'integrity-sentinel' ); ?>"><?php echo esc_textarea( $design['custom_html'] ); ?></textarea>
+								<p class="description"><?php esc_html_e( 'A small notice shown above the form. Filtered through the same rules as post content (wp_kses_post) — scripts and unsafe markup are stripped.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-login-custom-css"><?php esc_html_e( 'Custom CSS', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<textarea id="is-login-custom-css" name="is_login_design_settings[custom_css]" rows="8" class="large-text code" placeholder=".login form { }"><?php echo esc_textarea( $design['custom_css'] ); ?></textarea>
+								<p class="description"><?php esc_html_e( 'Applied last, after everything above, so it can override anything on the page — full freedom if the customizer fields aren\'t enough.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+					</table>
+					<p class="submit" style="display:flex;gap:10px;align-items:center;">
+						<?php submit_button( __( 'Save login design', 'integrity-sentinel' ), 'primary', 'submit', false ); ?>
+						<button type="button" class="button" id="is-login-preview-btn"><?php esc_html_e( 'Open real preview ↗', 'integrity-sentinel' ); ?></button>
+						<span id="is-login-preview-status" class="description"></span>
+					</p>
+				</form>
+
+				<div class="is-login-preview-pane">
+					<h2><?php esc_html_e( 'Instant preview', 'integrity-sentinel' ); ?></h2>
+					<p class="description"><?php esc_html_e( 'Updates as you type — a stand-in, not the real page. Use "Open real preview" above to see it rendered for real, unsaved.', 'integrity-sentinel' ); ?></p>
+					<div class="is-login-preview" id="is-login-preview" data-template="<?php echo esc_attr( $design['template'] ); ?>" style="--is-login-color:<?php echo esc_attr( $design['primary_color'] ); ?>;--is-login-radius:<?php echo esc_attr( (int) $design['border_radius'] ); ?>px;">
+						<div class="is-login-preview-hero" id="is-login-preview-hero">
+							<span class="is-login-preview-blob is-login-preview-blob-1"></span>
+							<span class="is-login-preview-blob is-login-preview-blob-2"></span>
+							<div class="is-login-preview-hero-copy">
+								<strong id="is-login-preview-heading"><?php echo esc_html( $design['hero_heading'] ); ?></strong>
+								<span id="is-login-preview-subheading"><?php echo esc_html( $design['hero_subheading'] ); ?></span>
+							</div>
+						</div>
+						<div class="is-login-preview-card">
+							<div class="is-login-preview-logo" id="is-login-preview-logo"><?php echo esc_html( get_bloginfo( 'name' ) ? get_bloginfo( 'name' ) : __( 'Your Site', 'integrity-sentinel' ) ); ?></div>
+							<div class="is-login-preview-field"></div>
+							<div class="is-login-preview-field"></div>
+							<div class="is-login-preview-button"><?php esc_html_e( 'Log In', 'integrity-sentinel' ); ?></div>
+						</div>
+					</div>
+				</div>
+			</div>
 		</div>
 		<?php
 		$this->render_shell_close();

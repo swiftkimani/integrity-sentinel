@@ -245,10 +245,197 @@
 		});
 	}
 
+	// ---------------------------------------------------------------
+	// Login Design: template grid + live preview + media picker
+	// ---------------------------------------------------------------
+
+	var SPLIT_TEMPLATES = ['sunrise', 'aurora-night', 'bubblegum'];
+
+	/** Wires an image URL field + Media Library picker + preview <img> + clear button, reused for the logo and the hero image. */
+	function initImagePicker(opts) {
+		var urlInput = document.getElementById(opts.urlId);
+		var previewImg = document.getElementById(opts.previewId);
+		var pickBtn = document.getElementById(opts.pickId);
+		var clearBtn = document.getElementById(opts.clearId);
+		if (!urlInput) {
+			return;
+		}
+
+		urlInput.addEventListener('input', function () {
+			var url = urlInput.value.trim();
+			if (previewImg) {
+				previewImg.src = url;
+				previewImg.style.display = url ? '' : 'none';
+			}
+			if (clearBtn) {
+				clearBtn.style.display = url ? '' : 'none';
+			}
+			if (opts.onChange) {
+				opts.onChange(url);
+			}
+		});
+
+		if (pickBtn && window.wp && window.wp.media) {
+			pickBtn.addEventListener('click', function (e) {
+				e.preventDefault();
+				var frame = window.wp.media({ title: opts.mediaTitle || 'Select an image', multiple: false, library: { type: 'image' } });
+				frame.on('select', function () {
+					var attachment = frame.state().get('selection').first().toJSON();
+					urlInput.value = attachment.url;
+					urlInput.dispatchEvent(new Event('input'));
+				});
+				frame.open();
+			});
+		}
+
+		if (clearBtn) {
+			clearBtn.addEventListener('click', function () {
+				urlInput.value = '';
+				urlInput.dispatchEvent(new Event('input'));
+			});
+		}
+	}
+
+	function initLoginDesignPreview() {
+		var preview = document.getElementById('is-login-preview');
+		if (!preview) {
+			return;
+		}
+
+		var colorInput = document.getElementById('is-login-color');
+		var radiusInput = document.getElementById('is-login-radius');
+		var radiusOutput = document.getElementById('is-login-radius-value');
+		var previewLogo = document.getElementById('is-login-preview-logo');
+		var previewHeading = document.getElementById('is-login-preview-heading');
+		var previewSubheading = document.getElementById('is-login-preview-subheading');
+		var previewHero = document.getElementById('is-login-preview-hero');
+		var heroFields = document.getElementById('is-hero-fields');
+		var headingInput = document.getElementById('is-hero-heading');
+		var subheadingInput = document.getElementById('is-hero-subheading');
+		var templateRadios = document.querySelectorAll('#is-template-grid input[type="radio"]');
+
+		function applyTemplate(template) {
+			preview.setAttribute('data-template', template);
+			var isSplit = SPLIT_TEMPLATES.indexOf(template) !== -1;
+			if (previewHero) {
+				previewHero.style.display = isSplit ? '' : 'none';
+			}
+			if (heroFields) {
+				heroFields.style.opacity = isSplit ? '' : '.4';
+			}
+		}
+
+		templateRadios.forEach(function (radio) {
+			radio.addEventListener('change', function () {
+				applyTemplate(radio.value);
+				templateRadios.forEach(function (r) {
+					r.closest('.is-template-card').classList.toggle('is-selected', r.checked);
+				});
+			});
+			if (radio.checked) {
+				applyTemplate(radio.value);
+			}
+		});
+
+		if (colorInput) {
+			colorInput.addEventListener('input', function () {
+				preview.style.setProperty('--is-login-color', colorInput.value);
+			});
+		}
+
+		if (radiusInput) {
+			radiusInput.addEventListener('input', function () {
+				preview.style.setProperty('--is-login-radius', radiusInput.value + 'px');
+				if (radiusOutput) {
+					radiusOutput.textContent = radiusInput.value + 'px';
+				}
+			});
+		}
+
+		if (headingInput && previewHeading) {
+			headingInput.addEventListener('input', function () {
+				previewHeading.textContent = headingInput.value;
+			});
+		}
+
+		if (subheadingInput && previewSubheading) {
+			subheadingInput.addEventListener('input', function () {
+				previewSubheading.textContent = subheadingInput.value;
+			});
+		}
+
+		initImagePicker({
+			urlId: 'is-login-logo-url',
+			previewId: 'is-login-logo-preview',
+			pickId: 'is-login-logo-pick',
+			clearId: 'is-login-logo-clear',
+			mediaTitle: 'Select a logo',
+			onChange: function (url) {
+				if (!previewLogo) {
+					return;
+				}
+				previewLogo.innerHTML = url ? '<img src="' + url.replace(/"/g, '&quot;') + '" alt="">' : previewLogo.textContent;
+			}
+		});
+
+		initImagePicker({
+			urlId: 'is-hero-image-url',
+			previewId: 'is-hero-image-preview',
+			pickId: 'is-hero-image-pick',
+			clearId: 'is-hero-image-clear',
+			mediaTitle: 'Select a hero image'
+		});
+
+		// "Open real preview": save an unsaved draft server-side and open
+		// the actual wp-login.php rendering it, instead of the stand-in
+		// mockup above. window.open() is called synchronously (before the
+		// fetch resolves) so browsers don't treat it as a blocked popup.
+		var previewBtn = document.getElementById('is-login-preview-btn');
+		var designForm = document.getElementById('is-login-design-form');
+		if (previewBtn && designForm) {
+			previewBtn.addEventListener('click', function () {
+				var status = document.getElementById('is-login-preview-status');
+				var win = window.open('', '_blank');
+				var body = new FormData(designForm);
+				body.append('action', 'is_preview_login_design');
+				body.append('nonce', window.ISAdmin.nonce);
+				if (status) {
+					status.textContent = 'Preparing preview…';
+				}
+				fetch(window.ISAdmin.ajaxUrl, { method: 'POST', credentials: 'same-origin', body: body })
+					.then(function (r) { return r.json(); })
+					.then(function (res) {
+						if (res.success && res.data && res.data.preview_url && win) {
+							win.location.href = res.data.preview_url;
+							if (status) {
+								status.textContent = '';
+							}
+						} else {
+							if (win) {
+								win.close();
+							}
+							if (status) {
+								status.textContent = 'Could not open preview.';
+							}
+						}
+					})
+					.catch(function () {
+						if (win) {
+							win.close();
+						}
+						if (status) {
+							status.textContent = 'Could not open preview.';
+						}
+					});
+			});
+		}
+	}
+
 	document.addEventListener('DOMContentLoaded', function () {
 		initScanButton();
 		initFindingActions();
 		initFindingModal();
 		initQuarantineDeleteToggles();
+		initLoginDesignPreview();
 	});
 })();

@@ -53,6 +53,7 @@ require_once dirname( __DIR__ ) . '/includes/class-is-guard.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-headers.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-ip-list.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-login.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-login-design.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-upload-guard.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-db.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-hotlink.php';

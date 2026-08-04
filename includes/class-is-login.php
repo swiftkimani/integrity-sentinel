@@ -6,9 +6,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Two related login-hardening jobs:
  *
- *  1. Login URL rename: hides wp-login.php behind a custom slug, off by
- *     default (an empty slug leaves stock WordPress behaviour untouched).
- *     WordPress core builds every wp-login.php link through site_url()/
+ *  1. Login URL rename: hides wp-login.php and wp-admin behind a custom
+ *     slug and/or a dedicated subdomain, both off by default (stock
+ *     WordPress behaviour is untouched until at least one is set -- see
+ *     maybe_intercept_login_url() for how the two combine). WordPress
+ *     core builds every wp-login.php link through site_url()/
  *     network_site_url() (wp_login_url(), wp_logout_url(),
  *     wp_lostpassword_url(), the login form's own POST target, the
  *     password-protected-post form, ...), so filtering those two covers
@@ -61,7 +63,10 @@ class IS_Login {
 	// ===================================================================
 
 	public static function default_rename_settings() {
-		return array( 'login_slug' => '' );
+		return array(
+			'login_slug' => '',
+			'login_host' => '',
+		);
 	}
 
 	public static function rename_settings() {
@@ -117,8 +122,66 @@ class IS_Login {
 		return strtolower( $uri );
 	}
 
+	/**
+	 * Pure: does this request target the literal wp-login.php file --
+	 * either exactly, or with extra PATH_INFO appended after it (e.g.
+	 * "/wp-login.php/x")? The trailing form still executes the real
+	 * wp-login.php on servers that pass PATH_INFO through to PHP (a
+	 * common Apache/mod_php default), so an exact-suffix-only check
+	 * would leave that variant unblocked -- a real bypass of the "old
+	 * default route" 404, not just a cosmetic gap.
+	 */
 	public static function is_wp_login_request( $normalized_path ) {
-		return (bool) preg_match( '#/wp-login\.php$#', $normalized_path );
+		return (bool) preg_match( '#/wp-login\.php(?:/.*)?$#', $normalized_path );
+	}
+
+	/**
+	 * Pure: does this request target the wp-admin directory itself (any
+	 * file under it, or the bare directory)? Matches subdirectory
+	 * installs too ("/blog/wp-admin/..."), not just a site root.
+	 */
+	public static function is_wp_admin_request( $normalized_path ) {
+		return (bool) preg_match( '#(?:^|/)wp-admin(?:/.*)?$#', $normalized_path );
+	}
+
+	/**
+	 * A short allowlist of wp-admin endpoints that must stay reachable
+	 * even for logged-out visitors once the login page is hidden:
+	 * admin-ajax.php and admin-post.php are the standard front-end
+	 * hooks countless plugins/themes rely on for logged-out AJAX and
+	 * form submissions, and blocking them would break unrelated site
+	 * functionality for zero security benefit -- neither one exposes an
+	 * authentication form.
+	 */
+	public static function should_allow_direct_wp_admin( $normalized_path ) {
+		return (bool) preg_match( '#/wp-admin/admin-(?:ajax|post)\.php$#', $normalized_path );
+	}
+
+	/**
+	 * Pure: normalizes a raw admin-entered hostname (which may have been
+	 * pasted as a full URL) down to a bare, comparable host. Rejects
+	 * anything that isn't a plausible hostname.
+	 */
+	public static function sanitize_login_host( $raw ) {
+		$host = strtolower( trim( (string) $raw ) );
+		$host = preg_replace( '#^[a-z][a-z0-9+.\-]*://#', '', $host );
+		$host = preg_replace( '#/.*$#', '', $host );
+		$host = preg_replace( '#:\d+$#', '', $host );
+
+		if ( '' === $host || false === strpos( $host, '.' ) || ! preg_match( '/^[a-z0-9.\-]+$/', $host ) ) {
+			return '';
+		}
+		return $host;
+	}
+
+	/** Pure: does the request's Host header match the configured login host? */
+	public static function is_configured_login_host( $host_header, $configured_host ) {
+		if ( '' === $configured_host ) {
+			return false;
+		}
+		$host = strtolower( trim( (string) $host_header ) );
+		$host = preg_replace( '#:\d+$#', '', $host );
+		return $host === $configured_host;
 	}
 
 	/** Pure: does the request's last path segment match the configured slug exactly? */
@@ -136,11 +199,17 @@ class IS_Login {
 	 * key/nonce or is harmless to expose, and blocking them only breaks
 	 * legitimate users following a stale external link -- it buys no
 	 * extra security, since brute-force scanners target the credential
-	 * form, not these.
+	 * form, not these. 'rp'/'resetpass' (the password-reset landing
+	 * page and its submit step) matter specifically for host-only mode
+	 * (no slug set): the reset email always links to the site's fixed
+	 * siteurl host, never to the login subdomain, so without this the
+	 * reset flow would 404 for anyone not already on that subdomain.
+	 * Both are gated by a single-use, time-limited key, same as
+	 * 'postpass' above -- not the credential form itself.
 	 */
 	public static function should_allow_direct_wp_login( array $get ) {
 		$action = isset( $get['action'] ) ? (string) $get['action'] : '';
-		return in_array( $action, array( 'postpass', 'logout', 'confirmaction', 'confirm_admin_email' ), true );
+		return in_array( $action, array( 'postpass', 'logout', 'confirmaction', 'confirm_admin_email', 'rp', 'resetpass' ), true );
 	}
 
 	/** Pure: rewrites a wp-login.php URL to use the custom slug instead. */
@@ -161,25 +230,143 @@ class IS_Login {
 		);
 	}
 
+	/**
+	 * Sends a real 404 status with a small, ordinary-looking error page
+	 * -- deliberately generic wording (no mention of login/admin/hidden)
+	 * so it reads exactly like any other "page not found" on the site,
+	 * not a security block, and a themed page instead of wp_die()'s bare
+	 * unstyled default. Includes a home link plus a no-JS-required
+	 * meta-refresh so a visitor who lands here always has a way back,
+	 * rather than a dead end.
+	 */
+	private static function render_not_found() {
+		status_header( 404 );
+		nocache_headers();
+
+		$home = home_url( '/' );
+		$name = get_bloginfo( 'name' );
+		?>
+<!DOCTYPE html>
+<html <?php language_attributes(); ?>>
+<head>
+<meta charset="<?php bloginfo( 'charset' ); ?>">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta http-equiv="refresh" content="8;url=<?php echo esc_url( $home ); ?>">
+<title><?php esc_html_e( 'Page not found', 'integrity-sentinel' ); ?> — <?php echo esc_html( $name ); ?></title>
+<style>
+:root{color-scheme:light dark;}
+*{box-sizing:border-box;}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#f8fafc;color:#0f172a;}
+.is-404-card{max-width:420px;text-align:center;}
+.is-404-code{font-size:14px;font-weight:700;letter-spacing:.1em;color:#94a3b8;margin:0 0 14px;}
+h1{font-size:26px;font-weight:800;margin:0 0 10px;letter-spacing:-0.01em;}
+p{font-size:15px;line-height:1.6;color:#475569;margin:0 0 28px;}
+a.is-404-button{display:inline-block;padding:12px 26px;border-radius:999px;background:#0f172a;color:#fff;text-decoration:none;font-weight:600;font-size:14px;}
+a.is-404-button:hover{opacity:.88;}
+.is-404-hint{margin-top:18px;font-size:12px;color:#94a3b8;}
+@media (prefers-color-scheme: dark) {
+	body{background:#0f172a;color:#f1f5f9;}
+	.is-404-code{color:#64748b;}
+	p{color:#94a3b8;}
+	a.is-404-button{background:#f1f5f9;color:#0f172a;}
+	.is-404-hint{color:#64748b;}
+}
+</style>
+</head>
+<body>
+<div class="is-404-card">
+	<p class="is-404-code">404</p>
+	<h1><?php esc_html_e( "This page doesn't exist", 'integrity-sentinel' ); ?></h1>
+	<p><?php esc_html_e( "The page you're looking for may have been moved or never existed.", 'integrity-sentinel' ); ?></p>
+	<a class="is-404-button" href="<?php echo esc_url( $home ); ?>">
+		<?php
+		printf(
+			/* translators: %s: site name */
+			esc_html__( 'Take me to %s', 'integrity-sentinel' ),
+			esc_html( $name )
+		);
+		?>
+	</a>
+	<p class="is-404-hint"><?php esc_html_e( 'Redirecting you there in a few seconds…', 'integrity-sentinel' ); ?></p>
+</div>
+</body>
+</html>
+		<?php
+		exit;
+	}
+
+	/**
+	 * Slug and host are independent switches -- either alone is a
+	 * complete hiding mechanism, and both together compose cleanly:
+	 *
+	 *  - Slug only: the classic path rename. site_url()/network_site_url()
+	 *    rewrite every wp-login.php link WordPress core generates
+	 *    (password reset, logout, ...) to use the slug instead, on
+	 *    whatever host the request arrives on -- so it needs no
+	 *    per-host special-casing at all.
+	 *  - Host only: no path rewrite happens (there's no slug to rewrite
+	 *    to), so the configured host is instead treated as a fully
+	 *    trusted alternate front door -- wp-login.php works there
+	 *    completely unblocked, any action, exactly as stock WordPress
+	 *    behaves. The one thing a host rewrite can't fix is that
+	 *    site_url() resolves from the fixed `siteurl` option, not the
+	 *    current request's Host header, so a password-reset email
+	 *    always links to the main domain regardless of which host the
+	 *    request was sent from -- which is why 'rp'/'resetpass' are in
+	 *    the safe-action allowlist (see should_allow_direct_wp_login()).
+	 *  - Both: the slug rewrite already covers every host, and the
+	 *    host's own root becomes an extra memorable, path-free entry
+	 *    alongside it.
+	 *
+	 * In every mode, the old default routes (wp-login.php and
+	 * wp-admin on any host OTHER than a configured trusted one) 404
+	 * for anyone not already logged in, rather than redirecting --
+	 * see the wp-admin branch below for why a redirect isn't enough.
+	 */
 	public function maybe_intercept_login_url() {
 		IS_Guard::run(
 			'login_rename',
 			function () {
-				$slug = self::rename_settings()['login_slug'];
-				if ( '' === $slug ) {
+				$settings = self::rename_settings();
+				$slug     = $settings['login_slug'];
+				$host_cfg = $settings['login_host'];
+				if ( '' === $slug && '' === $host_cfg ) {
 					return;
 				}
 
-				$path = self::normalize_path( isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- normalize_path() only strips/lowercases, no unsafe use
+				$path          = self::normalize_path( isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- normalize_path() only strips/lowercases, no unsafe use
+				$host          = isset( $_SERVER['HTTP_HOST'] ) ? wp_unslash( $_SERVER['HTTP_HOST'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- read-only comparison against a stored hostname, no unsafe use
+				$on_login_host = self::is_configured_login_host( $host, $host_cfg );
 
-				if ( self::is_wp_login_request( $path ) ) {
-					if ( self::should_allow_direct_wp_login( $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- read-only action-name check against a small allowlist
-						return;
-					}
-					wp_die( esc_html__( 'Not Found', 'integrity-sentinel' ), '', array( 'response' => 404 ) );
-				} elseif ( self::path_matches_slug( $path, $slug ) ) {
+				// The configured subdomain's bare root always shows the
+				// login form -- the whole point of the host feature is not
+				// needing to remember/type a slug there.
+				if ( '' === $path && $on_login_host ) {
 					require ABSPATH . 'wp-login.php';
 					exit;
+				}
+
+				if ( self::is_wp_login_request( $path ) ) {
+					// On the trusted host, wp-login.php is the real front
+					// door, not the "old default route" -- let it run
+					// completely normally (any action, no allowlist).
+					if ( $on_login_host || self::should_allow_direct_wp_login( $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- read-only action-name check against a small allowlist
+						return;
+					}
+					self::render_not_found();
+				} elseif ( '' !== $slug && self::path_matches_slug( $path, $slug ) ) {
+					require ABSPATH . 'wp-login.php';
+					exit;
+				} elseif ( self::is_wp_admin_request( $path ) && ! self::should_allow_direct_wp_admin( $path ) && ! is_user_logged_in() ) {
+					// The old default admin route must 404, not quietly
+					// redirect an anonymous visitor to the renamed login
+					// page -- a redirect still confirms "this site has a
+					// hidden login" and hands a scanner a starting point.
+					// Logged-in users are always let through unaffected,
+					// on any host, once COOKIE_DOMAIN (if needed) makes
+					// their session valid across hosts.
+					self::render_not_found();
 				}
 			}
 		);

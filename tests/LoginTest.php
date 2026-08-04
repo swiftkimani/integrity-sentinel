@@ -55,6 +55,80 @@ class LoginTest extends TestCase {
 		$this->assertFalse( IS_Login::is_wp_login_request( '/wp-login.php-lookalike' ) );
 	}
 
+	public function test_detects_wp_login_php_with_trailing_path_info() {
+		// A common Apache/mod_php bypass attempt against exact-suffix-only
+		// matching: appending extra path segments after the real .php
+		// file still executes it on servers that pass PATH_INFO through.
+		$this->assertTrue( IS_Login::is_wp_login_request( '/wp-login.php/anything' ) );
+		$this->assertTrue( IS_Login::is_wp_login_request( '/wp-login.php/../../etc/passwd' ) );
+	}
+
+	// ---- is_wp_admin_request ------------------------------------------------
+
+	public function test_detects_wp_admin_directory_and_its_files() {
+		$this->assertTrue( IS_Login::is_wp_admin_request( '/wp-admin' ) );
+		$this->assertTrue( IS_Login::is_wp_admin_request( '/wp-admin/options-general.php' ) );
+		$this->assertTrue( IS_Login::is_wp_admin_request( '/blog/wp-admin/index.php' ) );
+	}
+
+	public function test_does_not_flag_unrelated_paths_as_wp_admin() {
+		$this->assertFalse( IS_Login::is_wp_admin_request( '/my-secret-login' ) );
+		$this->assertFalse( IS_Login::is_wp_admin_request( '/wp-admin-lookalike/index.php' ) );
+		$this->assertFalse( IS_Login::is_wp_admin_request( '' ) );
+	}
+
+	// ---- should_allow_direct_wp_admin ----------------------------------------
+
+	public function test_allows_admin_ajax_and_admin_post() {
+		$this->assertTrue( IS_Login::should_allow_direct_wp_admin( '/wp-admin/admin-ajax.php' ) );
+		$this->assertTrue( IS_Login::should_allow_direct_wp_admin( '/wp-admin/admin-post.php' ) );
+	}
+
+	public function test_blocks_other_wp_admin_endpoints() {
+		$this->assertFalse( IS_Login::should_allow_direct_wp_admin( '/wp-admin' ) );
+		$this->assertFalse( IS_Login::should_allow_direct_wp_admin( '/wp-admin/index.php' ) );
+	}
+
+	// ---- sanitize_login_host --------------------------------------------------
+
+	public function test_accepts_a_bare_hostname() {
+		$this->assertSame( 'admin.example.com', IS_Login::sanitize_login_host( 'Admin.Example.com' ) );
+	}
+
+	public function test_strips_scheme_path_and_port_from_a_pasted_url() {
+		$this->assertSame( 'admin.example.com', IS_Login::sanitize_login_host( 'https://Admin.Example.com:8443/some/path' ) );
+	}
+
+	public function test_rejects_hostnames_without_a_dot() {
+		$this->assertSame( '', IS_Login::sanitize_login_host( 'localhost' ) );
+	}
+
+	public function test_rejects_invalid_characters() {
+		$this->assertSame( '', IS_Login::sanitize_login_host( 'admin example.com' ) );
+	}
+
+	public function test_empty_host_input_yields_empty_host() {
+		$this->assertSame( '', IS_Login::sanitize_login_host( '' ) );
+	}
+
+	// ---- is_configured_login_host ----------------------------------------------
+
+	public function test_matches_configured_host_case_insensitively() {
+		$this->assertTrue( IS_Login::is_configured_login_host( 'Admin.Example.com', 'admin.example.com' ) );
+	}
+
+	public function test_matches_configured_host_ignoring_port() {
+		$this->assertTrue( IS_Login::is_configured_login_host( 'admin.example.com:8443', 'admin.example.com' ) );
+	}
+
+	public function test_does_not_match_unrelated_host() {
+		$this->assertFalse( IS_Login::is_configured_login_host( 'example.com', 'admin.example.com' ) );
+	}
+
+	public function test_no_match_when_login_host_unset() {
+		$this->assertFalse( IS_Login::is_configured_login_host( 'anything.example.com', '' ) );
+	}
+
 	// ---- path_matches_slug -------------------------------------------------
 
 	public function test_matches_exact_last_segment() {
@@ -72,7 +146,7 @@ class LoginTest extends TestCase {
 	// ---- should_allow_direct_wp_login --------------------------------------
 
 	public function test_allows_the_small_safe_action_list() {
-		foreach ( array( 'postpass', 'logout', 'confirmaction', 'confirm_admin_email' ) as $action ) {
+		foreach ( array( 'postpass', 'logout', 'confirmaction', 'confirm_admin_email', 'rp', 'resetpass' ) as $action ) {
 			$this->assertTrue( IS_Login::should_allow_direct_wp_login( array( 'action' => $action ) ) );
 		}
 	}
@@ -80,6 +154,14 @@ class LoginTest extends TestCase {
 	public function test_blocks_a_plain_credential_attempt() {
 		$this->assertFalse( IS_Login::should_allow_direct_wp_login( array() ) );
 		$this->assertFalse( IS_Login::should_allow_direct_wp_login( array( 'action' => 'login' ) ) );
+	}
+
+	public function test_blocks_the_lostpassword_request_form_itself() {
+		// Deliberately NOT allowed: unlike 'rp'/'resetpass' (gated by a
+		// single-use key), this is the discoverable "enter your
+		// username" form with no key protecting it -- allowing it would
+		// quietly un-hide the login page's existence for that action.
+		$this->assertFalse( IS_Login::should_allow_direct_wp_login( array( 'action' => 'lostpassword' ) ) );
 	}
 
 	// ---- rewrite_login_url --------------------------------------------------

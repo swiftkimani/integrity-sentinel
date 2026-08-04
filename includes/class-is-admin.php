@@ -26,6 +26,8 @@ class IS_Admin {
 		add_action( 'admin_post_is_remove_exec_block', array( $this, 'handle_remove_exec_block' ) );
 		add_action( 'admin_post_is_apply_hotlink_block', array( $this, 'handle_apply_hotlink_block' ) );
 		add_action( 'admin_post_is_remove_hotlink_block', array( $this, 'handle_remove_hotlink_block' ) );
+		add_action( 'admin_post_is_apply_asset_cloak', array( $this, 'handle_apply_asset_cloak' ) );
+		add_action( 'admin_post_is_remove_asset_cloak', array( $this, 'handle_remove_asset_cloak' ) );
 		add_action( 'admin_post_is_reset_module_health', array( $this, 'handle_reset_module_health' ) );
 		add_action( 'admin_post_is_quarantine_finding', array( $this, 'handle_quarantine_finding' ) );
 		add_action( 'admin_post_is_quarantine_restore', array( $this, 'handle_quarantine_restore' ) );
@@ -308,6 +310,75 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_2fa_settings' ),
 			)
 		);
+		register_setting(
+			'is_session_settings_group',
+			'is_session_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_session_settings' ),
+			)
+		);
+		register_setting(
+			'is_asset_cloak_settings_group',
+			'is_asset_cloak_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_asset_cloak_settings' ),
+			)
+		);
+	}
+
+	public function sanitize_session_settings( $input ) {
+		$old = IS_Sessions::settings();
+		$out = array( 'alert_on_new_ip' => empty( $input['alert_on_new_ip'] ) ? 0 : 1 );
+
+		if ( $out['alert_on_new_ip'] !== $old['alert_on_new_ip'] ) {
+			IS_Audit_Log::record( 'session_settings_changed', array( 'alert_on_new_ip' => $out['alert_on_new_ip'] ) );
+		}
+
+		return $out;
+	}
+
+	public function sanitize_asset_cloak_settings( $input ) {
+		$old     = IS_Asset_Cloak::settings();
+		$raw     = isset( $input['alias'] ) ? $input['alias'] : '';
+		$alias   = IS_Asset_Cloak::sanitize_alias( $raw );
+		$enabled = empty( $input['enabled'] ) ? 0 : 1;
+
+		if ( '' !== trim( (string) $raw ) && '' === $alias ) {
+			add_settings_error(
+				'is_asset_cloak_settings',
+				'is_asset_cloak_alias_invalid',
+				__( 'That alias could not be used (empty after removing invalid characters, or it collides with a WordPress core path). The previous alias was kept.', 'integrity-sentinel' )
+			);
+			$alias = $old['alias'];
+		}
+
+		if ( $enabled && '' === $alias ) {
+			add_settings_error(
+				'is_asset_cloak_settings',
+				'is_asset_cloak_alias_required',
+				__( 'Set an alias before enabling the asset cloak — it was left off.', 'integrity-sentinel' )
+			);
+			$enabled = 0;
+		}
+
+		$out = array(
+			'enabled' => $enabled,
+			'alias'   => $alias,
+		);
+
+		if ( $out !== $old ) {
+			IS_Audit_Log::record(
+				'asset_cloak_settings_changed',
+				array(
+					'from' => $old,
+					'to'   => $out,
+				)
+			);
+		}
+
+		return $out;
 	}
 
 	public function sanitize_2fa_settings( $input ) {
@@ -670,6 +741,22 @@ class IS_Admin {
 	public function handle_apply_uploads_block() {
 		$this->guard_hardening_action();
 		$result = IS_Hardening::apply_uploads_block();
+		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
+	}
+
+	public function handle_apply_asset_cloak() {
+		$this->guard_hardening_action();
+		$alias = IS_Asset_Cloak::settings()['alias'];
+		if ( '' === $alias ) {
+			$this->redirect_hardening( __( 'Save an alias below before applying the .htaccess rule.', 'integrity-sentinel' ) );
+		}
+		$result = IS_Asset_Cloak::apply_block( $alias );
+		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
+	}
+
+	public function handle_remove_asset_cloak() {
+		$this->guard_hardening_action();
+		$result = IS_Asset_Cloak::remove_block();
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
@@ -1432,6 +1519,8 @@ class IS_Admin {
 
 			<?php $this->render_http_hardening_section(); ?>
 
+			<?php $this->render_asset_cloak_section(); ?>
+
 			<h2><?php esc_html_e( 'Hardening checks', 'integrity-sentinel' ); ?></h2>
 			<p>
 				<?php esc_html_e( 'Every scan also audits site configuration: the file editor, debug output, auth salts, world-writable paths, exposed .git/.env/debug.log files, backup archives in the webroot, administrator accounts, plugins closed on WordPress.org, and more. Results appear under Findings alongside file-integrity issues.', 'integrity-sentinel' ); ?>
@@ -1596,6 +1685,16 @@ class IS_Admin {
 					</td>
 				</tr>
 				<tr>
+					<th scope="row"><?php esc_html_e( 'Hide WordPress fingerprints', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_hardening_settings[hide_meta_fingerprints]" value="1" <?php checked( $settings['hide_meta_fingerprints'], 1 ); ?>>
+							<?php esc_html_e( 'Remove the head links and REST-discovery header that advertise WordPress-specific endpoints on every page (wlwmanifest, shortlink, the api.w.org discovery link/header).', 'integrity-sentinel' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'Safe for any site — purely stops advertising these URLs; it does not disable anything, so nothing that already knows the URL is affected.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+				<tr>
 					<th scope="row"><?php esc_html_e( 'Disable XML-RPC', 'integrity-sentinel' ); ?></th>
 					<td>
 						<label>
@@ -1618,6 +1717,75 @@ class IS_Admin {
 			</table>
 			<?php submit_button( __( 'Save HTTP hardening settings', 'integrity-sentinel' ) ); ?>
 		</form>
+		<?php
+	}
+
+	/**
+	 * Rewrites wp-content/wp-includes asset URLs to a disguised alias --
+	 * the riskiest thing this plugin writes to disk (a root .htaccess
+	 * rewrite rule). See IS_Asset_Cloak's class docblock before touching
+	 * this on a live site.
+	 */
+	private function render_asset_cloak_section() {
+		$settings = IS_Asset_Cloak::settings();
+		$active   = IS_Asset_Cloak::block_active();
+		?>
+		<h2><?php esc_html_e( 'Disguise wp-content/wp-includes paths', 'integrity-sentinel' ); ?></h2>
+		<div class="notice notice-warning inline">
+			<p>
+				<?php esc_html_e( 'The riskiest setting on this page: it rewrites your site\'s root .htaccess file. Getting it wrong can break every stylesheet, script, and uploaded image on the site. Unlike other settings here, IS_SAFE_MODE cannot undo this — it stops the URL rewriting in PHP, but not the .htaccess rule itself. Test on a staging copy first if at all possible, and use the "Remove" button below (not just disabling the checkbox) to fully revert.', 'integrity-sentinel' ); ?>
+			</p>
+		</div>
+		<p class="description">
+			<?php esc_html_e( 'Reduces (does not eliminate) the "this is WordPress" fingerprint an anonymous visitor sees when inspecting page source or a browser\'s Sources panel: enqueued styles/scripts, uploaded media, and theme/plugin asset URLs are rewritten from /wp-content/ and /wp-includes/ to your chosen alias. A theme or plugin that hardcodes a literal wp-content path instead of using WordPress\'s own URL functions won\'t be caught by this.', 'integrity-sentinel' ); ?>
+		</p>
+
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_asset_cloak_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="is_asset_cloak_alias"><?php esc_html_e( 'Alias', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<input type="text" id="is_asset_cloak_alias" name="is_asset_cloak_settings[alias]" value="<?php echo esc_attr( $settings['alias'] ); ?>" class="regular-text" placeholder="app">
+						<p class="description"><?php esc_html_e( 'e.g. "app" produces /app-content/ and /app-includes/ in place of /wp-content/ and /wp-includes/.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_asset_cloak_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Rewrite asset URLs to the alias above.', 'integrity-sentinel' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'Rewriting URLs alone does nothing until the .htaccess rule below is also applied — the disguised URLs would otherwise 404.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save alias settings', 'integrity-sentinel' ) ); ?>
+		</form>
+
+		<p>
+			<strong><?php esc_html_e( '.htaccess rule status:', 'integrity-sentinel' ); ?></strong>
+			<?php if ( $active ) : ?>
+				<span class="is-badge is-badge-low"><?php esc_html_e( 'Applied', 'integrity-sentinel' ); ?></span>
+			<?php else : ?>
+				<span class="is-badge is-badge-high"><?php esc_html_e( 'Not applied', 'integrity-sentinel' ); ?></span>
+			<?php endif; ?>
+		</p>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<?php wp_nonce_field( 'is_hardening_action' ); ?>
+			<?php if ( $active ) : ?>
+				<input type="hidden" name="action" value="is_remove_asset_cloak">
+				<?php submit_button( __( 'Remove the .htaccess rule', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+			<?php else : ?>
+				<input type="hidden" name="action" value="is_apply_asset_cloak">
+				<?php submit_button( __( 'Apply the .htaccess rule', 'integrity-sentinel' ), 'primary', 'submit', false, array( 'onclick' => "return confirm('" . esc_js( __( 'This rewrites your site\'s root .htaccess file. Continue only if you understand the risk described above.', 'integrity-sentinel' ) ) . "');" ) ); ?>
+			<?php endif; ?>
+		</form>
+		<p class="description">
+			<?php esc_html_e( 'Save an alias above first. Applying writes a marked rule block to the TOP of the root .htaccess (ahead of WordPress\'s own rules — required for it to work at all) and preserves everything else already in the file; removing deletes only that block. Apache/LiteSpeed only — nginx needs this added to your server config manually:', 'integrity-sentinel' ); ?>
+		</p>
+		<pre><?php echo esc_html( IS_Asset_Cloak::nginx_snippet( $settings['alias'] ) ); ?></pre>
 		<?php
 	}
 
@@ -1845,9 +2013,84 @@ class IS_Admin {
 				</table>
 				<?php submit_button( __( 'Save two-factor authentication settings', 'integrity-sentinel' ) ); ?>
 			</form>
+
+			<h2><?php esc_html_e( 'Your active sessions', 'integrity-sentinel' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'Every device currently signed in as you. If you don\'t recognize one, revoke it and change your password.', 'integrity-sentinel' ); ?></p>
+			<?php $this->render_sessions_table( get_current_user_id() ); ?>
+			<?php if ( count( IS_Sessions::sessions_for( get_current_user_id() ) ) > 1 ) : ?>
+				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:10px;">
+					<input type="hidden" name="action" value="is_revoke_other_sessions">
+					<?php wp_nonce_field( 'is_revoke_other_sessions' ); ?>
+					<button type="submit" class="button"><?php esc_html_e( 'Log out everywhere else', 'integrity-sentinel' ); ?></button>
+				</form>
+			<?php endif; ?>
+
+			<form method="post" action="options.php" style="margin-top:20px;">
+				<?php settings_fields( 'is_session_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'New-IP alerts', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_session_settings[alert_on_new_ip]" value="1" <?php checked( IS_Sessions::settings()['alert_on_new_ip'], 1 ); ?>>
+								<?php esc_html_e( 'Email/webhook alert the first time an account logs in from an IP it hasn\'t used before.', 'integrity-sentinel' ); ?>
+							</label>
+							<p class="description"><?php esc_html_e( 'A signal, not a block — travel and new devices are normal and still get in; you just get notified.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save session settings', 'integrity-sentinel' ) ); ?>
+			</form>
 		</div>
 		<?php
 		$this->render_shell_close();
+	}
+
+	/** Renders the active-sessions table for one user (used on the Login Security page for the current admin). */
+	private function render_sessions_table( $user_id ) {
+		$sessions = IS_Sessions::sessions_for( $user_id );
+		if ( ! $sessions ) {
+			echo '<p class="description">' . esc_html__( 'No active sessions found.', 'integrity-sentinel' ) . '</p>';
+			return;
+		}
+		?>
+		<table class="widefat striped" style="max-width:800px;">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'Device', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'IP address', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'Signed in', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'Expires', 'integrity-sentinel' ); ?></th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $sessions as $token => $session ) : ?>
+					<tr>
+						<td>
+							<?php echo esc_html( IS_Sessions::describe_user_agent( $session['ua'] ?? '' ) ); ?>
+							<?php if ( ! empty( $session['is_current'] ) ) : ?>
+								<span class="is-badge is-badge-info"><?php esc_html_e( 'This device', 'integrity-sentinel' ); ?></span>
+							<?php endif; ?>
+						</td>
+						<td><?php echo esc_html( $session['ip'] ?? '—' ); ?></td>
+						<td><?php echo esc_html( ! empty( $session['login'] ) ? human_time_diff( $session['login'] ) . ' ' . __( 'ago', 'integrity-sentinel' ) : '—' ); ?></td>
+						<td><?php echo esc_html( ! empty( $session['expiration'] ) ? human_time_diff( time(), $session['expiration'] ) : '—' ); ?></td>
+						<td>
+							<?php if ( empty( $session['is_current'] ) ) : ?>
+								<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+									<input type="hidden" name="action" value="is_revoke_session">
+									<input type="hidden" name="token" value="<?php echo esc_attr( $token ); ?>">
+									<?php wp_nonce_field( 'is_revoke_session' ); ?>
+									<button type="submit" class="button-link"><?php esc_html_e( 'Revoke', 'integrity-sentinel' ); ?></button>
+								</form>
+							<?php endif; ?>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
+		<?php
 	}
 
 	// -----------------------------------------------------------------

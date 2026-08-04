@@ -4,7 +4,7 @@ Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.20.0
+Stable tag: 1.21.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -189,6 +189,36 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.21.0 =
+* Fixed: a real bug where an uploaded login logo never actually
+  rendered — the "hide WordPress branding" rule (on by default) and the
+  logo-override rule used selectors of different CSS specificity, so
+  the branding rule always won regardless of which came later in the
+  stylesheet. Both now match exactly, with a regression test.
+* Fixed: every settings page's field table (form-table) had a glass
+  background and rounded corners but no interior padding or border at
+  all, so fields sat flush against the rounded edges — the container
+  had nothing containing it. Every settings page now gets proper
+  padding, border, and shadow, matching the rest of the UI.
+* New: Session Security — every admin can see their own active login
+  sessions (device, IP, sign-in time) and revoke individual ones or
+  all-others-at-once; a manage_options user can force-logout any
+  account's sessions entirely from the Users list (incident response);
+  an optional alert fires the first time an account logs in from an IP
+  it hasn't used before. Built entirely on WordPress core's own session
+  API, no custom session storage.
+* New: WordPress fingerprint reduction — removes the wlwmanifest,
+  shortlink, and REST-API-discovery head links/header that advertise
+  WordPress-specific endpoints on every page. Safe for any site, on by
+  default; purely stops advertising these URLs, doesn't disable them.
+* New (opt-in, off by default): disguises /wp-content/ and
+  /wp-includes/ asset URLs behind a chosen alias, reducing what a
+  visitor sees in page source or a browser's Sources panel. The
+  riskiest thing this plugin writes to disk — a root .htaccess rewrite
+  rule — so it ships with heavy warnings, an Nginx snippet for non-
+  Apache servers, and a one-click removal. Verified the generated rule
+  syntax directly against Apache's own config parser before shipping.
 
 = 1.20.0 =
 * Fixed: the Media Library picker (logo and hero image) could silently

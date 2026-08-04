@@ -155,6 +155,32 @@ class LoginDesignTest extends TestCase {
 		$this->assertStringContainsString( 'background-image:none', $css );
 	}
 
+	public function test_build_css_renders_the_configured_logo_even_with_branding_hidden() {
+		// Regression guard: hide_branding's suppression rule and the logo
+		// override rule must use selectors of EQUAL CSS specificity, or
+		// whichever is more specific wins regardless of which comes later
+		// in the stylesheet -- a real bug where a mismatched extra `div`
+		// type selector on the suppression rule made it always beat a
+		// configured logo, silently, since hide_branding defaults to on.
+		$css = IS_Login_Design::build_css(
+			array(
+				'logo_url'      => 'https://example.com/logo.png',
+				'hide_branding' => 1,
+			)
+		);
+
+		$this->assertMatchesRegularExpression( '/([a-z0-9 .#]+h1 a)\{background-image:none/', $css );
+		$this->assertMatchesRegularExpression( '/([a-z0-9 .#]+h1 a)\{background-image:url\("https:\/\/example\.com\/logo\.png"\)/', $css );
+
+		preg_match( '/([a-z0-9 .#]+h1 a)\{background-image:none/', $css, $none_match );
+		preg_match( '/([a-z0-9 .#]+h1 a)\{background-image:url\("https:\/\/example\.com\/logo\.png"\)/', $css, $logo_match );
+		$this->assertSame( trim( $none_match[1] ), trim( $logo_match[1] ), 'selectors must match exactly so specificity cannot diverge again' );
+
+		$none_pos = strpos( $css, $none_match[0] );
+		$logo_pos = strpos( $css, $logo_match[0] );
+		$this->assertGreaterThan( $none_pos, $logo_pos, 'the logo rule must come after (and therefore override) the suppression rule' );
+	}
+
 	public function test_build_css_appends_custom_css_with_breakout_guard() {
 		$css = IS_Login_Design::build_css( array( 'custom_css' => '.foo{}</style><script>x</script>' ) );
 		$this->assertStringContainsString( '.foo{}', $css );

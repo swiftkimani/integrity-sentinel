@@ -422,6 +422,32 @@
 
 .is-shell-content table.widefat thead th { background: rgba(148, 163, 184, 0.12); }
 
+/* form-table (every settings field on every page) previously had the
+   same glass background/rounded corners as widefat but no border, no
+   shadow, and -- critically -- no interior padding at all, so field
+   rows sat flush against the rounded edges: the glass card had nothing
+   containing it. Gets the same card treatment as widefat, plus its own
+   padding since (unlike widefat) it isn't a bordered grid of cells that
+   already reads as contained. */
+.is-shell-content table.form-table {
+	border: 1px solid rgba(255, 255, 255, 0.6);
+	box-shadow: var(--is-shadow-sm);
+	padding: 6px 24px;
+	margin-bottom: 4px;
+}
+
+.is-shell-content table.form-table > tbody > tr:first-child > th,
+.is-shell-content table.form-table > tbody > tr:first-child > td {
+	padding-top: 20px;
+}
+
+.is-shell-content table.form-table > tbody > tr:last-child > th,
+.is-shell-content table.form-table > tbody > tr:last-child > td {
+	padding-bottom: 20px;
+}
+
+.is-wrap h2 { margin-bottom: 6px; }
+
 /* ------------------------------------------------------------------ */
 /* Login Design: template picker + live preview                       */
 /* ------------------------------------------------------------------ */
@@ -660,6 +686,8 @@
 	.is-wrap table.widefat td {
 		white-space: normal;
 	}
+
+	.is-shell-content table.form-table { padding: 4px 14px; }
 
 	.is-cards,
 	.is-status-grid {

@@ -29,11 +29,12 @@ class IS_Headers {
 
 	public static function default_settings() {
 		return array(
-			'security_headers'     => 1,
-			'prevent_clickjacking' => 1,
-			'hide_wp_version'      => 1,
-			'disable_xmlrpc'       => 0,
-			'disable_feeds'        => 0,
+			'security_headers'       => 1,
+			'prevent_clickjacking'   => 1,
+			'hide_wp_version'        => 1,
+			'hide_meta_fingerprints' => 1,
+			'disable_xmlrpc'         => 0,
+			'disable_feeds'          => 0,
 		);
 	}
 
@@ -46,6 +47,7 @@ class IS_Headers {
 		add_action( 'login_init', array( $this, 'send_security_headers' ) );
 
 		add_action( 'init', array( $this, 'remove_version_generator' ) );
+		add_action( 'init', array( $this, 'remove_meta_fingerprints' ) );
 		add_filter( 'the_generator', array( $this, 'filter_the_generator' ) );
 		add_filter( 'style_loader_src', array( $this, 'filter_asset_version' ), 9999 );
 		add_filter( 'script_loader_src', array( $this, 'filter_asset_version' ), 9999 );
@@ -176,6 +178,36 @@ class IS_Headers {
 				return empty( self::settings()['hide_wp_version'] ) ? $src : self::strip_version_query_string( $src );
 			},
 			$src
+		);
+	}
+
+	// -----------------------------------------------------------------
+	// Fingerprint reduction (head links + REST discovery header)
+	// -----------------------------------------------------------------
+
+	/**
+	 * Removes the head <link> tags and REST API discovery HTTP header
+	 * that advertise WordPress-specific endpoints on every single page
+	 * -- purely a discovery/fingerprint removal, not a functional
+	 * lockdown. A client that already knows the REST API's URL (or any
+	 * RSD-discoverable endpoint) can still use it exactly as before;
+	 * this only stops broadcasting the URL in page source and response
+	 * headers. Deliberately independent of disable_xmlrpc, which is a
+	 * real functional change with compatibility risk (Jetpack, mobile
+	 * apps) -- this one has none, so it's safe to default on.
+	 */
+	public function remove_meta_fingerprints() {
+		IS_Guard::run(
+			'hide_meta_fingerprints',
+			function () {
+				if ( empty( self::settings()['hide_meta_fingerprints'] ) ) {
+					return;
+				}
+				remove_action( 'wp_head', 'wlwmanifest_link' );
+				remove_action( 'wp_head', 'wp_shortlink_wp_head' );
+				remove_action( 'wp_head', 'rest_output_link_wp_head' );
+				remove_action( 'template_redirect', 'rest_output_link_header', 11 );
+			}
 		);
 	}
 

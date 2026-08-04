@@ -218,8 +218,13 @@ class IS_Login_Design {
 			body.login div#login p#nav,body.login div#login p#backtoblog{font-size:13px;}
 		';
 		if ( $hide_branding ) {
+			// Same selector specificity as the logo override below
+			// (body.login #login h1 a, not body.login div#login h1 a) --
+			// build_css() relies on source order to let a configured logo
+			// win over this rule; mismatched specificity would make this
+			// one win regardless of order, since it's added first.
 			$css .= '
-				body.login div#login h1 a{background-image:none;width:auto;height:auto;text-indent:0;overflow:visible;display:inline-block;font-size:1.5em;font-weight:800;letter-spacing:-0.02em;padding:0;margin:0 0 20px;text-decoration:none;}
+				body.login #login h1 a{background-image:none;width:auto;height:auto;text-indent:0;overflow:visible;display:inline-block;font-size:1.5em;font-weight:800;letter-spacing:-0.02em;padding:0;margin:0 0 20px;text-decoration:none;}
 			';
 		}
 		return $css;

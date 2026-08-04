@@ -84,6 +84,7 @@ class HeadersTest extends TestCase {
 		$this->assertSame( 1, $defaults['security_headers'] );
 		$this->assertSame( 1, $defaults['prevent_clickjacking'] );
 		$this->assertSame( 1, $defaults['hide_wp_version'] );
+		$this->assertSame( 1, $defaults['hide_meta_fingerprints'] );
 		$this->assertSame( 0, $defaults['disable_xmlrpc'] );
 		$this->assertSame( 0, $defaults['disable_feeds'] );
 	}

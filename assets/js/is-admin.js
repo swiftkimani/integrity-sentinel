@@ -249,7 +249,7 @@
 	// Login Design: template grid + live preview + media picker
 	// ---------------------------------------------------------------
 
-	var SPLIT_TEMPLATES = ['sunrise', 'aurora-night', 'bubblegum'];
+	var SPLIT_TEMPLATES = ['sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean'];
 
 	/** Wires an image URL field + Media Library picker + preview <img> + clear button, reused for the logo and the hero image. */
 	function initImagePicker(opts) {
@@ -275,9 +275,19 @@
 			}
 		});
 
-		if (pickBtn && window.wp && window.wp.media) {
+		if (pickBtn) {
+			// window.wp.media is checked here, at click time, not when this
+			// listener is attached (page load) -- wp-media's own script can
+			// still be loading at that point since there's no explicit
+			// script dependency wiring it before is-admin.js, and checking
+			// only once up front would permanently skip attaching the
+			// listener if that race was lost.
 			pickBtn.addEventListener('click', function (e) {
 				e.preventDefault();
+				if (!window.wp || !window.wp.media) {
+					window.alert('The media library is still loading -- please wait a moment and try again.');
+					return;
+				}
 				var frame = window.wp.media({ title: opts.mediaTitle || 'Select an image', multiple: false, library: { type: 'image' } });
 				frame.on('select', function () {
 					var attachment = frame.state().get('selection').first().toJSON();
@@ -313,6 +323,7 @@
 		var headingInput = document.getElementById('is-hero-heading');
 		var subheadingInput = document.getElementById('is-hero-subheading');
 		var templateRadios = document.querySelectorAll('#is-template-grid input[type="radio"]');
+		var positionRadios = document.querySelectorAll('input[name="is_login_design_settings[hero_position]"]');
 
 		function applyTemplate(template) {
 			preview.setAttribute('data-template', template);
@@ -325,6 +336,10 @@
 			}
 		}
 
+		function applyPosition(position) {
+			preview.setAttribute('data-position', position === 'right' ? 'right' : 'left');
+		}
+
 		templateRadios.forEach(function (radio) {
 			radio.addEventListener('change', function () {
 				applyTemplate(radio.value);
@@ -334,6 +349,17 @@
 			});
 			if (radio.checked) {
 				applyTemplate(radio.value);
+			}
+		});
+
+		positionRadios.forEach(function (radio) {
+			radio.addEventListener('change', function () {
+				if (radio.checked) {
+					applyPosition(radio.value);
+				}
+			});
+			if (radio.checked) {
+				applyPosition(radio.value);
 			}
 		});
 
@@ -402,10 +428,21 @@
 				if (status) {
 					status.textContent = 'Preparing preview…';
 				}
+				// Read as text first, not r.json() directly: a PHP notice/
+				// warning ahead of the real JSON output (or a nonce
+				// failure, which wp_die()s a bare "-1") would otherwise
+				// fail silently inside r.json() with no way to tell why.
 				fetch(window.ISAdmin.ajaxUrl, { method: 'POST', credentials: 'same-origin', body: body })
-					.then(function (r) { return r.json(); })
-					.then(function (res) {
-						if (res.success && res.data && res.data.preview_url && win) {
+					.then(function (r) { return r.text(); })
+					.then(function (text) {
+						var res;
+						try {
+							res = JSON.parse(text);
+						} catch (parseErr) {
+							console.error('[Integrity Sentinel] preview request returned a non-JSON response:', text);
+							throw parseErr;
+						}
+						if (res && res.success && res.data && res.data.preview_url && win) {
 							win.location.href = res.data.preview_url;
 							if (status) {
 								status.textContent = '';
@@ -414,18 +451,21 @@
 							if (win) {
 								win.close();
 							}
+							var message = res && res.data && res.data.message ? res.data.message : 'Could not open preview.';
 							if (status) {
-								status.textContent = 'Could not open preview.';
+								status.textContent = message;
 							}
+							console.error('[Integrity Sentinel] preview request failed:', res);
 						}
 					})
-					.catch(function () {
+					.catch(function (err) {
 						if (win) {
 							win.close();
 						}
 						if (status) {
 							status.textContent = 'Could not open preview.';
 						}
+						console.error('[Integrity Sentinel] preview request error:', err);
 					});
 			});
 		}

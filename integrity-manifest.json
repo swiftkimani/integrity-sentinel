@@ -1,8 +1,8 @@
 {
-    "assets/css/is-admin.css": "ca99ee08f10dc553276b38b3b11ce7e6ad8a0e65a74122902fe1620f4a8d7447",
-    "assets/js/is-admin.js": "7fc0ef4131b73e6f1d6c2f37eaf8a14c83c891b3591494eaef087e9c3e6fdafe",
+    "assets/css/is-admin.css": "b525dda7e3c70366d8c7883429d52aad7a3b0d00191df8b45b2cf2bc29bd944b",
+    "assets/js/is-admin.js": "e77d9e1686a36ae6c72d8a09aab22b12de36b828c211fc3e6e12856cf63eae6a",
     "includes/class-is-2fa.php": "1a8cd2a4440c2c2bf8a541f5f7a3a3122b57e4fb8a6715f054f7e8fbe8d000e8",
-    "includes/class-is-admin.php": "1ce58b3fa7e7a43818664f0b3bf106514745089ba5b762ab9fd2c93f564c8807",
+    "includes/class-is-admin.php": "9b8c009c6a80237b88ee1bb51e47561366916bc529d5f83f05071f4760457a6b",
     "includes/class-is-ajax.php": "a99df7713c60ae99bcfeae62a28c53073eb38ab493fa53615e7c6ac22a24acb6",
     "includes/class-is-audit-log.php": "26a043fab8f92c25e905f7404b5d1d7f8edd7251205ffa8fc6cca5de84eb14bf",
     "includes/class-is-bot-block.php": "c2455037b3b93c7b78fa0ad764a445d1102118807736bb17f947c08d3842e687",
@@ -17,7 +17,7 @@
     "includes/class-is-heuristics.php": "78854f4483ce1f3cb08b9d643f8d435612843a3828292d65f5ce2ce4d988bfdc",
     "includes/class-is-hotlink.php": "bef7fcbeb5a325fed168d3793d822b414ca2dc9269c9c38fe1c804af0034db1d",
     "includes/class-is-ip-list.php": "7b7617082db0d651ec86bb931ed6844eaf0a701419fd2e37ff1ec20f93fe9bcc",
-    "includes/class-is-login-design.php": "259936a5e08b78f288ee927111f858c68ed9335d28eb91d76ebde6552bc1287c",
+    "includes/class-is-login-design.php": "20e53cf46f4eee8152c8b334fd4d75b1c87e133046d4e34d4de59248cd1ebd01",
     "includes/class-is-login.php": "88543d7308809e89170cd4c55180c0862d96790a400d64c40ef771c804f5dab6",
     "includes/class-is-notifications.php": "4fe06aeedfd77272df788773fe255916a8685689cc80d782248298388fe2e972",
     "includes/class-is-plugin-checksums.php": "b2e17087084782ad087c7c5f6d79a31ccf1ac32e8a079d2713bdd22a455e8026",
@@ -28,6 +28,6 @@
     "includes/class-is-totp.php": "ffb38a4812f033ab7de73d75f4bbdfb309ca05e77e6d465ec7a11c2fc5868d87",
     "includes/class-is-update-monitor.php": "3af2c1a01eff230f4f35e7069a3a50a106a20a84c7bdba1982d2364074fc52ff",
     "includes/class-is-upload-guard.php": "c0c98e530442494c5fef1f22a98041995e79dec41b672815bc71074f61cd69c9",
-    "integrity-sentinel.php": "c02e8b7114329c4d675754289a9b92725ddc9ea12e2649343875ae63ce9a2e61",
+    "integrity-sentinel.php": "f4f5a96ecd38f5f4020de8ebb53d86fccf08c69badcfd19f38832280d9904197",
     "uninstall.php": "31fd5d17ba898b944761a5c33c8a7c60336f412c87860d08d40bbe0a2950e6b3"
 }

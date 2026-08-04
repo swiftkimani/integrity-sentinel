@@ -4,18 +4,19 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Cosmetic layer for wp-login.php: four built-in templates (one plain
- * centered card, three "split-screen" designs with a decorative hero
- * panel down one side, in the style of modern SaaS sign-in pages), a
- * customizer (accent color, logo, corner radius, hero heading/subheading/
- * image) layered on top, an escape hatch for raw custom CSS, and an
- * optional sanitized HTML banner above the form.
+ * Cosmetic layer for wp-login.php: seven built-in templates (one plain
+ * centered card, six "split-screen" designs with a decorative hero
+ * panel down either side, in the style of modern SaaS sign-in pages), a
+ * customizer (accent color, logo, corner radius, hero position/heading/
+ * subheading/image) layered on top, an escape hatch for raw custom CSS,
+ * and an optional sanitized HTML banner above the form.
  *
  * Two things this class deliberately owns beyond styling:
- *  - It scrubs every WordPress-branding surface on the login page
- *    (the default logo mark, its link target, and the <title> tag) --
- *    see header_url()/header_text()/filter_login_title(). This runs
- *    unconditionally, not just when a custom logo is set.
+ *  - It scrubs every WordPress-branding surface on the login page (the
+ *    default logo mark, its link target, and the <title> tag) when
+ *    "Hide WordPress branding" is on -- the default, and not gated on a
+ *    custom logo being set -- see header_url()/header_text()/
+ *    filter_login_title().
  *  - It supports previewing an *unsaved* draft: settings() transparently
  *    swaps in a short-lived per-admin transient when the request carries
  *    `?is_preview=1` from a signed-in admin -- see preview_override().
@@ -64,12 +65,15 @@ class IS_Login_Design {
 			'sunrise'      => __( 'Sunrise', 'integrity-sentinel' ),
 			'aurora-night' => __( 'Aurora Night', 'integrity-sentinel' ),
 			'bubblegum'    => __( 'Bubblegum', 'integrity-sentinel' ),
+			'forest'       => __( 'Forest', 'integrity-sentinel' ),
+			'monochrome'   => __( 'Monochrome', 'integrity-sentinel' ),
+			'ocean'        => __( 'Ocean', 'integrity-sentinel' ),
 		);
 	}
 
 	/** Pure: which templates use the split-screen hero-panel layout (everything but the plain card). */
 	public static function is_split_template( $template ) {
-		return in_array( $template, array( 'sunrise', 'aurora-night', 'bubblegum' ), true );
+		return in_array( $template, array( 'sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean' ), true );
 	}
 
 	public static function default_settings() {
@@ -78,9 +82,11 @@ class IS_Login_Design {
 			'logo_url'        => '',
 			'primary_color'   => '#6366f1',
 			'border_radius'   => 18,
+			'hero_position'   => 'left',
 			'hero_heading'    => 'Welcome back',
 			'hero_subheading' => '',
 			'hero_image_url'  => '',
+			'hide_branding'   => 1,
 			'custom_css'      => '',
 			'custom_html'     => '',
 		);
@@ -170,8 +176,10 @@ class IS_Login_Design {
 		$logo     = self::is_http_url( $settings['logo_url'] ) ? $settings['logo_url'] : '';
 		$hero_img = self::is_http_url( $settings['hero_image_url'] ) ? $settings['hero_image_url'] : '';
 
+		$position = 'right' === $settings['hero_position'] ? 'right' : 'left';
+
 		$css  = sprintf( ':root{--is-login-color:%s;--is-login-radius:%dpx;}', $color, $radius );
-		$css .= self::base_css();
+		$css .= self::base_css( ! empty( $settings['hide_branding'] ) );
 
 		if ( '' !== $logo ) {
 			$css .= sprintf(
@@ -181,7 +189,7 @@ class IS_Login_Design {
 		}
 
 		if ( self::is_split_template( $template ) ) {
-			$css .= self::split_layout_css();
+			$css .= self::split_layout_css( $position );
 			$css .= self::template_hero_css( $template );
 			if ( '' !== $hero_img ) {
 				$css .= sprintf(
@@ -198,26 +206,50 @@ class IS_Login_Design {
 	}
 
 	/**
-	 * Pure: rules that apply to every template, unconditionally --
-	 * chiefly stripping the default WordPress logo mark. Without a
-	 * custom logo, the site name (already forced by header_text()) shows
-	 * as a plain text wordmark instead of the WordPress icon.
+	 * Pure: rules that apply to every template. When $hide_branding is
+	 * true (the default), strips the default WordPress logo mark --
+	 * without a custom logo, the site name (already forced by
+	 * header_text() while this setting is on) shows as a plain text
+	 * wordmark instead of the WordPress icon. When false, the stock
+	 * WordPress logo/branding is left alone.
 	 */
-	private static function base_css() {
-		return '
-			body.login div#login h1 a{background-image:none;width:auto;height:auto;text-indent:0;overflow:visible;display:inline-block;font-size:1.5em;font-weight:800;letter-spacing:-0.02em;padding:0;margin:0 0 20px;text-decoration:none;}
+	private static function base_css( $hide_branding ) {
+		$css = '
 			body.login div#login p#nav,body.login div#login p#backtoblog{font-size:13px;}
 		';
+		if ( $hide_branding ) {
+			$css .= '
+				body.login div#login h1 a{background-image:none;width:auto;height:auto;text-indent:0;overflow:visible;display:inline-block;font-size:1.5em;font-weight:800;letter-spacing:-0.02em;padding:0;margin:0 0 20px;text-decoration:none;}
+			';
+		}
+		return $css;
 	}
 
-	/** Pure: repositions the real #login card into the right half of the viewport, leaving the left half for .is-login-hero. */
-	private static function split_layout_css() {
+	/**
+	 * Pure: repositions the real #login card into one half of the
+	 * viewport (left or right), leaving the other half for
+	 * .is-login-hero -- see hero_position in default_settings().
+	 */
+	private static function split_layout_css( $position ) {
+		$justify = 'right' === $position ? 'flex-start' : 'flex-end';
+		$side    = 'right' === $position ? 'right' : 'left';
 		return '
-			body.login{min-height:100vh;box-sizing:border-box;display:flex;align-items:center;justify-content:flex-end;padding:5vh 7vw;background:#fff;}
+			body.login{min-height:100vh;box-sizing:border-box;display:flex;align-items:center;justify-content:' . $justify . ';padding:5vh 7vw;background:#fff;}
 			body.login #login{width:380px;max-width:100%;margin:0;position:relative;z-index:2;}
+			.is-login-hero{' . $side . ':0;}
+			/* Tablet and below: the hero panel is fixed-width-percentage and
+			   would crush the form, so it drops out entirely and the card
+			   recenters -- a standard, well-supported pattern for
+			   split-screen sign-in pages at this viewport size. */
 			@media screen and (max-width: 900px) {
 				.is-login-hero{display:none;}
 				body.login{justify-content:center;padding:5vh 6vw;}
+			}
+			/* Small phones: the card itself gets tighter side padding so it
+			   is not flush against the viewport edges. */
+			@media screen and (max-width: 480px) {
+				body.login{padding:5vh 4vw;}
+				body.login #login{width:100%;}
 			}
 		';
 	}
@@ -225,7 +257,7 @@ class IS_Login_Design {
 	/** Pure: the decorative hero-panel background for one split template. Colors tint from --is-login-color via color-mix(). */
 	private static function template_hero_css( $template ) {
 		$shared = '
-			.is-login-hero{position:fixed;top:0;left:0;bottom:0;width:50%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;padding:8vh 6vw;overflow:hidden;z-index:1;}
+			.is-login-hero{position:fixed;top:0;bottom:0;width:50%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;padding:8vh 6vw;overflow:hidden;z-index:1;}
 			.is-login-hero-scrim{position:absolute;inset:0;}
 			.is-login-hero-copy{position:relative;z-index:2;color:#fff;}
 			.is-login-hero-copy h2{font-size:clamp(28px,4vw,46px);font-weight:800;line-height:1.12;letter-spacing:-0.02em;margin:0 0 14px;}
@@ -258,6 +290,32 @@ class IS_Login_Design {
 					.is-login-blob-3{animation-delay:.8s;}
 				';
 
+			case 'forest':
+				return $shared . '
+					.is-login-hero{background:linear-gradient(160deg, color-mix(in srgb, var(--is-login-color) 35%, #14532d) 0%, color-mix(in srgb, var(--is-login-color) 45%, #166534) 45%, #052e16 100%);}
+					.is-login-blob-1{top:-10%;left:-10%;width:220px;height:220px;border-radius:38% 62% 63% 37% / 41% 44% 56% 59%;background:color-mix(in srgb, var(--is-login-color) 50%, #4ade80);opacity:.3;filter:blur(10px);}
+					.is-login-blob-2{bottom:-12%;right:-8%;width:260px;height:260px;border-radius:63% 37% 30% 70% / 50% 45% 55% 50%;background:color-mix(in srgb, var(--is-login-color) 40%, #a3e635);opacity:.22;filter:blur(14px);}
+					.is-login-blob-3{top:45%;right:15%;width:60px;height:60px;border-radius:42% 58% 70% 30% / 45% 45% 55% 55%;background:rgba(255,255,255,.18);filter:blur(4px);}
+				';
+
+			case 'monochrome':
+				return $shared . '
+					.is-login-hero{background:linear-gradient(160deg,#18181b 0%,#27272a 100%);}
+					.is-login-hero::before{content:"";position:absolute;inset:0;background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.035) 0px, rgba(255,255,255,.035) 1px, transparent 1px, transparent 14px);}
+					.is-login-blob-1{top:-6%;right:-6%;width:200px;height:200px;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:transparent;filter:none;}
+					.is-login-blob-2{bottom:-10%;left:-10%;width:260px;height:260px;border-radius:50%;border:1px solid rgba(255,255,255,.1);background:transparent;filter:none;}
+					.is-login-blob-3{top:40%;left:20%;width:8px;height:8px;background:var(--is-login-color);border-radius:50%;filter:none;opacity:1;}
+				';
+
+			case 'ocean':
+				return $shared . '
+					.is-login-hero{background:linear-gradient(170deg, color-mix(in srgb, var(--is-login-color) 40%, #0c4a6e) 0%, color-mix(in srgb, var(--is-login-color) 50%, #0369a1) 45%, #164e63 100%);}
+					.is-login-hero::before{content:"";position:absolute;left:0;right:0;bottom:0;height:40%;background:linear-gradient(0deg, rgba(255,255,255,.08), transparent), repeating-radial-gradient(circle at 20% 100%, rgba(255,255,255,.05) 0, rgba(255,255,255,.05) 2px, transparent 2px, transparent 40px);}
+					.is-login-blob-1{top:10%;right:-8%;width:220px;height:220px;border-radius:50%;background:color-mix(in srgb, var(--is-login-color) 40%, #22d3ee);opacity:.25;filter:blur(20px);}
+					.is-login-blob-2{bottom:-14%;left:-10%;width:280px;height:280px;border-radius:50%;background:#0891b2;opacity:.3;filter:blur(20px);}
+					.is-login-blob-3{top:55%;left:30%;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.25);filter:blur(2px);}
+				';
+
 			case 'sunrise':
 			default:
 				return $shared . '
@@ -285,15 +343,22 @@ class IS_Login_Design {
 			';
 		}
 
-		$dark_labels = 'aurora-night' === $template;
+		// #nav/#backtoblog always sit on the right-hand white card column
+		// (see split_layout_css()), never on the hero panel itself, so
+		// their color only needs to work against white -- true regardless
+		// of which template's hero is showing.
+		$button = 'monochrome' === $template
+			? 'background:#18181b;border-color:#18181b;'
+			: 'background:linear-gradient(135deg, var(--is-login-color), color-mix(in srgb, var(--is-login-color) 60%, #f43f5e));border-color:transparent;';
+
 		return '
 			body.login div#login h1 a{color:#0f172a;}
 			.login form{background:#fff;border-radius:var(--is-login-radius);box-shadow:0 20px 60px rgba(15,23,42,.18);border:1px solid rgba(15,23,42,.04);}
 			.login form .input,.login input[type=text],.login input[type=password]{border-radius:calc(var(--is-login-radius) * 0.45);box-shadow:none;border-color:#e2e8f0;}
 			.login form .input:focus,.login input[type=text]:focus,.login input[type=password]:focus{border-color:var(--is-login-color);box-shadow:0 0 0 3px color-mix(in srgb, var(--is-login-color) 25%, transparent);}
-			.login .button-primary{background:linear-gradient(135deg, var(--is-login-color), color-mix(in srgb, var(--is-login-color) 60%, #f43f5e));border-color:transparent;border-radius:calc(var(--is-login-radius) * 0.45);text-shadow:none;box-shadow:0 8px 20px color-mix(in srgb, var(--is-login-color) 40%, transparent);}
-			.login .button-primary:hover,.login .button-primary:focus{filter:brightness(1.06);}
-			.login #nav a,.login #backtoblog a{color:' . ( $dark_labels ? '#475569' : '#64748b' ) . ';}
+			.login .button-primary{' . $button . 'border-radius:calc(var(--is-login-radius) * 0.45);text-shadow:none;box-shadow:0 8px 20px color-mix(in srgb, var(--is-login-color) 40%, transparent);}
+			.login .button-primary:hover,.login .button-primary:focus{filter:brightness(1.15);}
+			.login #nav a,.login #backtoblog a{color:#64748b;}
 			.login .message,.login #login_error{border-left-color:var(--is-login-color);border-radius:calc(var(--is-login-radius) * 0.45);}
 		';
 	}
@@ -347,33 +412,36 @@ class IS_Login_Design {
 		);
 	}
 
-	/** Always points the logo link at the site's own homepage -- never wordpress.org. */
+	/** When "Hide WordPress branding" is on (the default), points the logo link at the site's own homepage -- never wordpress.org. */
 	public function header_url( $url ) {
 		return IS_Guard::run(
 			'login_design',
-			function () {
-				return home_url( '/' );
+			function () use ( $url ) {
+				return empty( self::settings()['hide_branding'] ) ? $url : home_url( '/' );
 			},
 			$url
 		);
 	}
 
-	/** Always uses the site name -- never falls back to WordPress core's default "Powered by WordPress". */
+	/** When "Hide WordPress branding" is on (the default), uses the site name instead of WordPress core's default "Powered by WordPress". */
 	public function header_text( $text ) {
 		return IS_Guard::run(
 			'login_design',
-			function () {
-				return get_bloginfo( 'name' );
+			function () use ( $text ) {
+				return empty( self::settings()['hide_branding'] ) ? $text : get_bloginfo( 'name' );
 			},
 			$text
 		);
 	}
 
-	/** Rebuilds the <title> tag from the site name, so core's default "... — WordPress" suffix never appears. */
+	/** When "Hide WordPress branding" is on (the default), rebuilds the <title> tag from the site name so core's default "... — WordPress" suffix never appears. */
 	public function filter_login_title( $title ) {
 		return IS_Guard::run(
 			'login_design',
-			function () {
+			function () use ( $title ) {
+				if ( empty( self::settings()['hide_branding'] ) ) {
+					return $title;
+				}
 				return get_bloginfo( 'name' ) . ' — ' . __( 'Log In', 'integrity-sentinel' );
 			},
 			$title

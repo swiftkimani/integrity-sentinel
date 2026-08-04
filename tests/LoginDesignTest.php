@@ -64,7 +64,7 @@ class LoginDesignTest extends TestCase {
 	// ---- is_split_template -------------------------------------------------
 
 	public function test_split_templates_have_a_hero_panel() {
-		foreach ( array( 'sunrise', 'aurora-night', 'bubblegum' ) as $template ) {
+		foreach ( array( 'sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean' ) as $template ) {
 			$this->assertTrue( IS_Login_Design::is_split_template( $template ), $template );
 		}
 	}
@@ -166,6 +166,37 @@ class LoginDesignTest extends TestCase {
 			$css = IS_Login_Design::build_css( array( 'template' => $template ) );
 			$this->assertNotSame( '', trim( $css ), $template );
 		}
+	}
+
+	public function test_build_css_has_seven_templates() {
+		$this->assertCount( 7, IS_Login_Design::templates() );
+	}
+
+	public function test_build_css_places_hero_on_the_left_by_default() {
+		$css = IS_Login_Design::build_css( array( 'template' => 'sunrise' ) );
+		$this->assertStringContainsString( '.is-login-hero{left:0;}', $css );
+	}
+
+	public function test_build_css_places_hero_on_the_right_when_configured() {
+		$css = IS_Login_Design::build_css( array( 'template' => 'sunrise', 'hero_position' => 'right' ) );
+		$this->assertStringContainsString( '.is-login-hero{right:0;}', $css );
+		$this->assertStringNotContainsString( '.is-login-hero{left:0;}', $css );
+	}
+
+	public function test_build_css_rejects_an_invalid_hero_position() {
+		$css_bad     = IS_Login_Design::build_css( array( 'template' => 'sunrise', 'hero_position' => 'up' ) );
+		$css_default = IS_Login_Design::build_css( array( 'template' => 'sunrise', 'hero_position' => 'left' ) );
+		$this->assertSame( $css_default, $css_bad );
+	}
+
+	public function test_build_css_suppresses_wordpress_logo_when_hide_branding_is_on() {
+		$css = IS_Login_Design::build_css( array( 'hide_branding' => 1 ) );
+		$this->assertStringContainsString( 'background-image:none', $css );
+	}
+
+	public function test_build_css_leaves_stock_logo_when_hide_branding_is_off() {
+		$css = IS_Login_Design::build_css( array( 'hide_branding' => 0 ) );
+		$this->assertStringNotContainsString( 'background-image:none', $css );
 	}
 
 	// ---- build_hero_html --------------------------------------------------

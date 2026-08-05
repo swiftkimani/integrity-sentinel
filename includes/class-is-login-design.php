@@ -83,19 +83,53 @@ class IS_Login_Design {
 
 	public static function default_settings() {
 		return array(
-			'template'        => 'sunrise',
-			'logo_url'        => '',
-			'primary_color'   => '#6366f1',
-			'border_radius'   => 18,
-			'hero_position'   => 'left',
-			'hero_heading'    => 'Welcome back',
-			'hero_subheading' => '',
-			'hero_image_url'  => '',
-			'hero_gallery'    => array(),
-			'hide_branding'   => 1,
-			'custom_css'      => '',
-			'custom_html'     => '',
+			'template'           => 'sunrise',
+			'logo_url'           => '',
+			'primary_color'      => '#6366f1',
+			'border_radius'      => 18,
+			'hero_position'      => 'left',
+			'hero_heading'       => 'Welcome back',
+			'hero_subheading'    => '',
+			'hero_image_url'     => '',
+			'hero_gallery'       => array(),
+			'carousel_indicator' => 'bars',
+			'hide_branding'      => 1,
+			'custom_css'         => '',
+			'custom_html'        => '',
 		);
+	}
+
+	/**
+	 * Pure: the three hero placements. 'left'/'right' are the classic
+	 * split-screen (artwork one side, form the other); 'center' floats the
+	 * form as a frosted card dead-center over a full-bleed hero (gradient,
+	 * photo, or the live carousel) -- see center_layout_css()/center_hero_css().
+	 */
+	public static function hero_positions() {
+		return array( 'left', 'right', 'center' );
+	}
+
+	/** Pure: the selectable carousel slide-indicator styles. */
+	public static function carousel_indicators() {
+		return array(
+			'bars'       => __( 'Bars', 'integrity-sentinel' ),
+			'dots'       => __( 'Dots', 'integrity-sentinel' ),
+			'numbers'    => __( 'Numbers', 'integrity-sentinel' ),
+			'thumbnails' => __( 'Thumbnails', 'integrity-sentinel' ),
+			'none'       => __( 'None (arrows only)', 'integrity-sentinel' ),
+		);
+	}
+
+	/** Pure: validated carousel indicator style, defaulting to 'bars'. */
+	public static function carousel_indicator( array $settings ) {
+		$value = isset( $settings['carousel_indicator'] ) ? (string) $settings['carousel_indicator'] : 'bars';
+		return array_key_exists( $value, self::carousel_indicators() ) ? $value : 'bars';
+	}
+
+	/** Pure: validated hero placement, defaulting to 'left'. */
+	public static function hero_position( array $settings ) {
+		$value = isset( $settings['hero_position'] ) ? (string) $settings['hero_position'] : 'left';
+		return in_array( $value, self::hero_positions(), true ) ? $value : 'left';
 	}
 
 	public static function settings() {
@@ -182,7 +216,7 @@ class IS_Login_Design {
 		$logo     = self::is_http_url( $settings['logo_url'] ) ? $settings['logo_url'] : '';
 		$hero_img = self::is_http_url( $settings['hero_image_url'] ) ? $settings['hero_image_url'] : '';
 
-		$position = 'right' === $settings['hero_position'] ? 'right' : 'left';
+		$position = self::hero_position( $settings );
 
 		$css  = sprintf( ':root{--is-login-color:%s;--is-login-radius:%dpx;}', $color, $radius );
 		$css .= self::base_css( ! empty( $settings['hide_branding'] ) );
@@ -202,8 +236,14 @@ class IS_Login_Design {
 		$uses_img_tag = in_array( $template, array( 'carousel', 'polaroid' ), true );
 
 		if ( self::is_split_template( $template ) ) {
-			$css .= self::split_layout_css( $position );
-			$css .= self::template_hero_css( $template );
+			if ( 'center' === $position ) {
+				$css .= self::center_layout_css();
+				$css .= self::template_hero_css( $template );
+				$css .= self::center_hero_css( $template );
+			} else {
+				$css .= self::split_layout_css( $position );
+				$css .= self::template_hero_css( $template );
+			}
 			if ( '' !== $hero_img && ! $uses_img_tag ) {
 				$css .= sprintf(
 					'.is-login-hero{background-image:linear-gradient(180deg, rgba(15,15,25,.15), rgba(15,15,25,.6)), url("%s");background-size:cover;background-position:center;}.is-login-hero .is-login-blob{display:none;}',
@@ -213,6 +253,14 @@ class IS_Login_Design {
 		}
 
 		$css .= self::template_form_css( $template );
+
+		// Center placement re-skins the card into a translucent, frosted
+		// panel that floats over the hero -- it has to win over
+		// template_form_css()'s solid-white card, so it's appended after it.
+		if ( self::is_split_template( $template ) && 'center' === $position ) {
+			$css .= self::center_form_css();
+		}
+
 		$css .= self::sanitize_css_for_style_tag( $settings['custom_css'] );
 
 		return $css;
@@ -269,6 +317,66 @@ class IS_Login_Design {
 				body.login{padding:5vh 4vw;}
 				body.login #login{width:100%;}
 			}
+		';
+	}
+
+	/**
+	 * Pure: the 'center' placement scaffold -- the real #login card is
+	 * centered in the viewport and lifted above a full-bleed hero (set up
+	 * by center_hero_css()). Unlike the left/right split, the hero is never
+	 * hidden on smaller screens here: it *is* the backdrop the form sits on.
+	 */
+	private static function center_layout_css() {
+		return '
+			body.login{min-height:100vh;box-sizing:border-box;display:flex;align-items:center;justify-content:center;padding:6vh 5vw;background:#0b0b14;}
+			body.login #login{width:400px;max-width:100%;margin:0;position:relative;z-index:3;}
+			@media screen and (max-width: 480px) {
+				body.login{padding:4vh 4vw;}
+				body.login #login{width:100%;}
+			}
+		';
+	}
+
+	/**
+	 * Pure: promotes a split template's hero from a half-width side panel
+	 * to a full-bleed backdrop for the centered card, darkens it for form
+	 * legibility, and tucks the (now-behind-the-card) hero copy away. For
+	 * the Carousel template the slides stay live behind the card and the
+	 * nav controls drop to the bottom-center so they clear it.
+	 */
+	private static function center_hero_css( $template ) {
+		// WordPress prints the hero inside #login (via login_message), just
+		// above the form. Since the hero is positioned, a positive z-index
+		// would paint it *over* the in-flow form; a negative one drops it
+		// behind every in-flow sibling (form, wordmark, nav links) while
+		// still covering the viewport, which is exactly what a full-bleed
+		// backdrop wants.
+		$css = '
+			.is-login-hero{position:fixed;inset:0;width:100%;height:100%;padding:0;align-items:center;justify-content:center;z-index:-1;}
+			.is-login-hero::after{content:"";position:absolute;inset:0;background:radial-gradient(130% 130% at 50% 0%, rgba(6,6,16,.12) 0%, rgba(6,6,16,.5) 70%, rgba(6,6,16,.72) 100%);z-index:1;pointer-events:none;}
+			.is-login-hero .is-login-hero-copy{display:none;}
+		';
+		if ( 'carousel' === $template ) {
+			$css .= '
+				.is-login-hero.is-login-carousel::after{display:none;}
+				.is-login-carousel .is-carousel-controls{position:absolute;left:0;right:0;bottom:28px;justify-content:center;}
+			';
+		}
+		return $css;
+	}
+
+	/**
+	 * Pure: the frosted-glass card treatment used only by the 'center'
+	 * placement, appended after template_form_css() so it overrides the
+	 * solid-white card. #nav/#backtoblog and the wordmark now sit over the
+	 * dark hero (not a white column), so their color flips to light here.
+	 */
+	private static function center_form_css() {
+		return '
+			.login form{background:rgba(255,255,255,.92);border:1px solid rgba(255,255,255,.5);box-shadow:0 30px 90px rgba(0,0,0,.5),0 2px 10px rgba(0,0,0,.3);backdrop-filter:blur(16px) saturate(1.3);-webkit-backdrop-filter:blur(16px) saturate(1.3);}
+			body.login div#login h1 a{color:#fff;text-align:center;text-shadow:0 2px 14px rgba(0,0,0,.55);}
+			.login #nav a,.login #backtoblog a{color:rgba(255,255,255,.9);text-shadow:0 1px 6px rgba(0,0,0,.5);}
+			.login #nav a:hover,.login #backtoblog a:hover{color:#fff;}
 		';
 	}
 
@@ -335,21 +443,38 @@ class IS_Login_Design {
 				';
 
 			case 'carousel':
-				// Layout differs from every other split template: heading
-				// on top, a framed <img> gallery below it (rendered by
-				// build_hero_html()/build_carousel_html()), dot/arrow
-				// controls at the bottom -- see carousel_js() for the
-				// (tiny, vanilla, dependency-free) interaction.
+				// Full-bleed, immersive gallery: the slides fill the entire
+				// hero panel (a slow Ken Burns zoom on the active one, unless
+				// reduced-motion is set), a gradient scrim keeps the overlaid
+				// heading/controls legible, and the visitor's chosen indicator
+				// style (bars/dots/numbers/thumbnails/none) renders at the
+				// bottom. Markup: build_carousel_html(); interaction:
+				// carousel_js().
 				return $shared . '
-					.is-login-hero.is-login-carousel{justify-content:flex-start;padding-top:9vh;background:linear-gradient(160deg, #1a0b2e 0%, color-mix(in srgb, var(--is-login-color) 40%, #2d1b4e) 55%, #0f0620 100%);}
-					.is-login-carousel .is-login-hero-copy{margin-bottom:26px;}
-					.is-carousel-frame{position:relative;width:100%;max-width:420px;aspect-ratio:4/3;border-radius:calc(var(--is-login-radius) * 0.8);overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);}
-					.is-carousel-slide{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .6s ease;}
+					.is-login-hero.is-login-carousel{justify-content:flex-end;padding:8vh 6vw;background:linear-gradient(160deg, #1a0b2e 0%, color-mix(in srgb, var(--is-login-color) 40%, #2d1b4e) 55%, #0f0620 100%);}
+					.is-carousel-frame{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;z-index:0;background:#0f0620;}
+					.is-carousel-slide{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .8s ease;}
 					.is-carousel-slide.is-active{opacity:1;}
-					.is-carousel-controls{display:flex;align-items:center;gap:14px;margin-top:18px;}
-					.is-carousel-dots{display:flex;gap:6px;}
-					.is-carousel-dot{width:22px;height:3px;border-radius:2px;border:none;background:rgba(255,255,255,.3);cursor:pointer;padding:0;transition:background .2s ease, width .2s ease;}
-					.is-carousel-dot.is-active{background:#fff;width:34px;}
+					@media (prefers-reduced-motion: no-preference){
+						.is-carousel-slide.is-active{animation:is-carousel-kenburns 14s ease-out both;}
+					}
+					@keyframes is-carousel-kenburns{from{transform:scale(1.12);}to{transform:scale(1);}}
+					.is-carousel-scrim{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg, rgba(10,6,25,.15) 0%, rgba(10,6,25,.3) 50%, rgba(10,6,25,.85) 100%);}
+					.is-login-carousel .is-login-hero-copy{position:relative;z-index:2;margin-bottom:22px;}
+					.is-carousel-controls{position:relative;z-index:2;display:flex;align-items:center;gap:14px;}
+					.is-carousel-dots{display:flex;gap:6px;align-items:center;}
+					.is-carousel-dot{border:none;cursor:pointer;padding:0;}
+					.is-ind-bars .is-carousel-dot{width:22px;height:3px;border-radius:2px;background:rgba(255,255,255,.3);transition:background .2s ease, width .2s ease;}
+					.is-ind-bars .is-carousel-dot.is-active{background:#fff;width:34px;}
+					.is-ind-dots .is-carousel-dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.4);transition:background .2s ease, transform .2s ease;}
+					.is-ind-dots .is-carousel-dot.is-active{background:#fff;transform:scale(1.35);}
+					.is-ind-thumbs{gap:8px;}
+					.is-ind-thumbs .is-carousel-dot{width:46px;height:34px;border-radius:7px;overflow:hidden;background:none;border:2px solid transparent;opacity:.5;transition:opacity .2s ease, border-color .2s ease;}
+					.is-ind-thumbs .is-carousel-dot img{width:100%;height:100%;object-fit:cover;display:block;}
+					.is-ind-thumbs .is-carousel-dot.is-active{opacity:1;border-color:#fff;}
+					.is-carousel-counter{display:flex;align-items:center;gap:5px;color:#fff;font-size:14px;font-weight:600;letter-spacing:.03em;font-variant-numeric:tabular-nums;}
+					.is-carousel-counter .is-carousel-sep{opacity:.5;}
+					.is-carousel-counter .is-carousel-total{opacity:.6;}
 					.is-carousel-prev,.is-carousel-next{width:36px;height:36px;flex:none;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;transition:background .2s ease;}
 					.is-carousel-prev:hover,.is-carousel-next:hover{background:rgba(255,255,255,.2);}
 				';
@@ -509,7 +634,33 @@ class IS_Login_Design {
 		$subheading = trim( (string) $settings['hero_subheading'] );
 		$images     = self::carousel_images( $settings );
 
-		$html  = '<div class="is-login-hero is-login-carousel" aria-hidden="true">';
+		$html = '<div class="is-login-hero is-login-carousel" aria-hidden="true">';
+
+		// No images: fall back to the same soft generated pattern every
+		// other split template uses (copy above the blobs).
+		if ( empty( $images ) ) {
+			$html .= '<div class="is-login-hero-copy">';
+			if ( '' !== $heading ) {
+				$html .= '<h2>' . htmlspecialchars( $heading, ENT_QUOTES, 'UTF-8' ) . '</h2>';
+			}
+			if ( '' !== $subheading ) {
+				$html .= '<p>' . htmlspecialchars( $subheading, ENT_QUOTES, 'UTF-8' ) . '</p>';
+			}
+			$html .= '</div>';
+			$html .= '<span class="is-login-blob is-login-blob-1"></span><span class="is-login-blob is-login-blob-2"></span><span class="is-login-blob is-login-blob-3"></span>';
+			$html .= '</div>';
+			return $html;
+		}
+
+		// Full-bleed slide stack + scrim (behind the overlaid copy/controls).
+		$html .= '<div class="is-carousel-frame">';
+		foreach ( $images as $i => $url ) {
+			$html .= '<img class="is-carousel-slide' . ( 0 === $i ? ' is-active' : '' ) . '" src="' . htmlspecialchars( $url, ENT_QUOTES, 'UTF-8' ) . '" alt="">';
+		}
+		$html .= '<span class="is-carousel-scrim"></span>';
+		$html .= '</div>';
+
+		// Overlaid heading/subheading.
 		$html .= '<div class="is-login-hero-copy">';
 		if ( '' !== $heading ) {
 			$html .= '<h2>' . htmlspecialchars( $heading, ENT_QUOTES, 'UTF-8' ) . '</h2>';
@@ -519,30 +670,45 @@ class IS_Login_Design {
 		}
 		$html .= '</div>';
 
-		if ( empty( $images ) ) {
-			$html .= '<span class="is-login-blob is-login-blob-1"></span><span class="is-login-blob is-login-blob-2"></span><span class="is-login-blob is-login-blob-3"></span>';
-			$html .= '</div>';
-			return $html;
-		}
-
-		$html .= '<div class="is-carousel-frame">';
-		foreach ( $images as $i => $url ) {
-			$html .= '<img class="is-carousel-slide' . ( 0 === $i ? ' is-active' : '' ) . '" src="' . htmlspecialchars( $url, ENT_QUOTES, 'UTF-8' ) . '" alt="">';
-		}
-		$html .= '</div>';
-
 		if ( count( $images ) > 1 ) {
 			$html .= '<div class="is-carousel-controls">';
 			$html .= '<button type="button" class="is-carousel-prev" aria-label="Previous">&larr;</button>';
-			$html .= '<div class="is-carousel-dots">';
-			foreach ( $images as $i => $url ) {
-				$html .= '<button type="button" class="is-carousel-dot' . ( 0 === $i ? ' is-active' : '' ) . '"></button>';
-			}
-			$html .= '</div>';
+			$html .= self::carousel_indicator_html( self::carousel_indicator( $settings ), $images );
 			$html .= '<button type="button" class="is-carousel-next" aria-label="Next">&rarr;</button>';
 			$html .= '</div>';
 		}
 
+		$html .= '</div>';
+		return $html;
+	}
+
+	/**
+	 * Pure: the slide-indicator markup for a chosen style. 'bars', 'dots'
+	 * and 'thumbnails' all emit clickable .is-carousel-dot buttons (the JS
+	 * treats them identically, toggling .is-active); the parent modifier
+	 * class (is-ind-*) is what makes them look different. 'numbers' emits a
+	 * live "current / total" counter, 'none' emits nothing (arrows only).
+	 */
+	private static function carousel_indicator_html( $indicator, array $images ) {
+		if ( 'none' === $indicator ) {
+			return '';
+		}
+
+		if ( 'numbers' === $indicator ) {
+			return '<div class="is-carousel-counter"><span class="is-carousel-current">1</span>'
+				. '<span class="is-carousel-sep">/</span>'
+				. '<span class="is-carousel-total">' . count( $images ) . '</span></div>';
+		}
+
+		$modifier = 'dots' === $indicator ? 'is-ind-dots' : ( 'thumbnails' === $indicator ? 'is-ind-thumbs' : 'is-ind-bars' );
+
+		$html = '<div class="is-carousel-dots ' . $modifier . '">';
+		foreach ( $images as $i => $url ) {
+			$inner = 'thumbnails' === $indicator
+				? '<img src="' . htmlspecialchars( $url, ENT_QUOTES, 'UTF-8' ) . '" alt="">'
+				: '';
+			$html .= '<button type="button" class="is-carousel-dot' . ( 0 === $i ? ' is-active' : '' ) . '">' . $inner . '</button>';
+		}
 		$html .= '</div>';
 		return $html;
 	}
@@ -561,6 +727,7 @@ class IS_Login_Design {
 	if (!root) { return; }
 	var slides = root.querySelectorAll('.is-carousel-slide');
 	var dots = root.querySelectorAll('.is-carousel-dot');
+	var current = root.querySelector('.is-carousel-current');
 	var prevBtn = root.querySelector('.is-carousel-prev');
 	var nextBtn = root.querySelector('.is-carousel-next');
 	var index = 0;
@@ -574,6 +741,7 @@ class IS_Login_Design {
 		for (var d = 0; d < dots.length; d++) {
 			dots[d].classList.toggle('is-active', d === index);
 		}
+		if (current) { current.textContent = String(index + 1); }
 	}
 	function restart() {
 		if (timer) { clearInterval(timer); }

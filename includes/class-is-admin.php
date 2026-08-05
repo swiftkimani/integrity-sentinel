@@ -626,7 +626,13 @@ class IS_Admin {
 			$hero_image = '';
 		}
 
-		$hero_position = isset( $input['hero_position'] ) && 'right' === $input['hero_position'] ? 'right' : 'left';
+		$hero_position = isset( $input['hero_position'] ) && in_array( $input['hero_position'], IS_Login_Design::hero_positions(), true )
+			? $input['hero_position']
+			: 'left';
+
+		$carousel_indicator = isset( $input['carousel_indicator'] ) && array_key_exists( $input['carousel_indicator'], IS_Login_Design::carousel_indicators() )
+			? $input['carousel_indicator']
+			: $defaults['carousel_indicator'];
 
 		// One image URL per line (a textarea, not a repeater UI -- simple
 		// and robust). Only used by the Carousel template; harmless if
@@ -656,6 +662,7 @@ class IS_Admin {
 			'hero_subheading' => isset( $input['hero_subheading'] ) ? sanitize_text_field( $input['hero_subheading'] ) : '',
 			'hero_image_url'  => $hero_image,
 			'hero_gallery'    => $hero_gallery,
+			'carousel_indicator' => $carousel_indicator,
 			'hide_branding'   => empty( $input['hide_branding'] ) ? 0 : 1,
 			'custom_css'      => IS_Login_Design::sanitize_css_for_style_tag( isset( $input['custom_css'] ) ? (string) $input['custom_css'] : '' ),
 			'custom_html'     => isset( $input['custom_html'] ) ? wp_kses_post( $input['custom_html'] ) : '',
@@ -2340,8 +2347,9 @@ class IS_Admin {
 							<th scope="row"><?php esc_html_e( 'Placement', 'integrity-sentinel' ); ?></th>
 							<td>
 								<label style="margin-right:16px;"><input type="radio" name="is_login_design_settings[hero_position]" value="left" id="is-hero-position-left" <?php checked( $design['hero_position'], 'left' ); ?>> <?php esc_html_e( 'Left', 'integrity-sentinel' ); ?></label>
-								<label><input type="radio" name="is_login_design_settings[hero_position]" value="right" id="is-hero-position-right" <?php checked( $design['hero_position'], 'right' ); ?>> <?php esc_html_e( 'Right', 'integrity-sentinel' ); ?></label>
-								<p class="description"><?php esc_html_e( 'Which side the artwork sits on; the sign-in form takes the other side.', 'integrity-sentinel' ); ?></p>
+								<label style="margin-right:16px;"><input type="radio" name="is_login_design_settings[hero_position]" value="right" id="is-hero-position-right" <?php checked( $design['hero_position'], 'right' ); ?>> <?php esc_html_e( 'Right', 'integrity-sentinel' ); ?></label>
+								<label><input type="radio" name="is_login_design_settings[hero_position]" value="center" id="is-hero-position-center" <?php checked( $design['hero_position'], 'center' ); ?>> <?php esc_html_e( 'Center', 'integrity-sentinel' ); ?></label>
+								<p class="description"><?php esc_html_e( 'Left / Right split the screen — artwork one side, form the other. Center floats the form as a frosted-glass card over a full-screen backdrop (the gradient, your photo, or the live carousel).', 'integrity-sentinel' ); ?></p>
 							</td>
 						</tr>
 						<tr>
@@ -2367,8 +2375,26 @@ class IS_Admin {
 						<tr id="is-carousel-gallery-row" style="<?php echo 'carousel' === $design['template'] ? '' : 'display:none;'; ?>">
 							<th scope="row"><label for="is-hero-gallery"><?php esc_html_e( 'Carousel images', 'integrity-sentinel' ); ?></label></th>
 							<td>
-								<textarea id="is-hero-gallery" name="is_login_design_settings[hero_gallery]" rows="4" class="large-text code" placeholder="https://example.com/photo-1.jpg&#10;https://example.com/photo-2.jpg&#10;https://example.com/photo-3.jpg"><?php echo esc_textarea( implode( "\n", $design['hero_gallery'] ) ); ?></textarea>
-								<p class="description"><?php esc_html_e( 'Only used by the "Carousel" template — one image URL per line, up to 8. Two or more shows dot/arrow navigation to cycle through them; one behaves like a normal static image; none falls back to a generated pattern.', 'integrity-sentinel' ); ?></p>
+								<div class="is-gallery-picker" id="is-gallery-picker">
+									<div class="is-gallery-thumbs" id="is-gallery-thumbs" aria-live="polite"></div>
+									<button type="button" class="button" id="is-gallery-add"><?php esc_html_e( 'Add images from Media Library', 'integrity-sentinel' ); ?></button>
+								</div>
+								<details class="is-gallery-advanced">
+									<summary><?php esc_html_e( 'Edit image URLs manually', 'integrity-sentinel' ); ?></summary>
+									<textarea id="is-hero-gallery" name="is_login_design_settings[hero_gallery]" rows="4" class="large-text code" placeholder="https://example.com/photo-1.jpg&#10;https://example.com/photo-2.jpg&#10;https://example.com/photo-3.jpg"><?php echo esc_textarea( implode( "\n", $design['hero_gallery'] ) ); ?></textarea>
+								</details>
+								<p class="description"><?php esc_html_e( 'Only used by the "Carousel" template — pick up to 8 images from your library (or paste URLs manually above). Two or more images enables navigation; one behaves like a static image; none falls back to a generated pattern.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr id="is-carousel-indicator-row" style="<?php echo 'carousel' === $design['template'] ? '' : 'display:none;'; ?>">
+							<th scope="row"><label for="is-carousel-indicator"><?php esc_html_e( 'Slide indicators', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<select id="is-carousel-indicator" name="is_login_design_settings[carousel_indicator]">
+									<?php foreach ( IS_Login_Design::carousel_indicators() as $ind_key => $ind_label ) : ?>
+										<option value="<?php echo esc_attr( $ind_key ); ?>" <?php selected( IS_Login_Design::carousel_indicator( $design ), $ind_key ); ?>><?php echo esc_html( $ind_label ); ?></option>
+									<?php endforeach; ?>
+								</select>
+								<p class="description"><?php esc_html_e( 'How the slide navigation looks: slim bars, round dots, a numeric counter, image thumbnails, or arrows only.', 'integrity-sentinel' ); ?></p>
 							</td>
 						</tr>
 					</table>

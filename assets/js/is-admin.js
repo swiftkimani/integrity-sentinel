@@ -306,6 +306,84 @@
 		}
 	}
 
+	/**
+	 * Visual carousel-gallery picker: a thumbnail strip + "Add from Media
+	 * Library" (multi-select) button, backed by the existing newline-per-URL
+	 * textarea (still the form's source of truth, so the PHP sanitizer is
+	 * untouched). Editing the textarea by hand re-renders the strip.
+	 */
+	function initGalleryPicker() {
+		var textarea = document.getElementById('is-hero-gallery');
+		var thumbs = document.getElementById('is-gallery-thumbs');
+		var addBtn = document.getElementById('is-gallery-add');
+		if (!textarea || !thumbs) {
+			return;
+		}
+		var MAX = 8;
+
+		function read() {
+			return textarea.value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+		}
+		function write(list) {
+			textarea.value = list.slice(0, MAX).join('\n');
+			render();
+		}
+		function render() {
+			var list = read();
+			thumbs.innerHTML = '';
+			list.forEach(function (url, i) {
+				var cell = document.createElement('div');
+				cell.className = 'is-gallery-thumb';
+				var img = document.createElement('img');
+				img.src = url;
+				img.alt = '';
+				var remove = document.createElement('button');
+				remove.type = 'button';
+				remove.className = 'is-gallery-thumb-remove';
+				remove.setAttribute('aria-label', 'Remove image');
+				remove.textContent = '×';
+				remove.addEventListener('click', function () {
+					var next = read();
+					next.splice(i, 1);
+					write(next);
+				});
+				cell.appendChild(img);
+				cell.appendChild(remove);
+				thumbs.appendChild(cell);
+			});
+			if (addBtn) {
+				addBtn.disabled = list.length >= MAX;
+			}
+		}
+
+		textarea.addEventListener('input', render);
+
+		if (addBtn) {
+			addBtn.addEventListener('click', function (e) {
+				e.preventDefault();
+				if (!window.wp || !window.wp.media) {
+					window.alert('The media library is still loading -- please wait a moment and try again.');
+					return;
+				}
+				var frame = window.wp.media({ title: 'Select carousel images', multiple: 'add', library: { type: 'image' } });
+				frame.on('select', function () {
+					var selection = frame.state().get('selection');
+					var list = read();
+					selection.each(function (attachment) {
+						var url = attachment.toJSON().url;
+						if (url && list.indexOf(url) === -1) {
+							list.push(url);
+						}
+					});
+					write(list);
+				});
+				frame.open();
+			});
+		}
+
+		render();
+	}
+
 	function initLoginDesignPreview() {
 		var preview = document.getElementById('is-login-preview');
 		if (!preview) {
@@ -334,14 +412,18 @@
 			if (heroFields) {
 				heroFields.style.opacity = isSplit ? '' : '.4';
 			}
-			var galleryRow = document.getElementById('is-carousel-gallery-row');
-			if (galleryRow) {
-				galleryRow.style.display = 'carousel' === template ? '' : 'none';
-			}
+			var isCarousel = 'carousel' === template;
+			['is-carousel-gallery-row', 'is-carousel-indicator-row'].forEach(function (id) {
+				var row = document.getElementById(id);
+				if (row) {
+					row.style.display = isCarousel ? '' : 'none';
+				}
+			});
 		}
 
 		function applyPosition(position) {
-			preview.setAttribute('data-position', position === 'right' ? 'right' : 'left');
+			var value = (position === 'right' || position === 'center') ? position : 'left';
+			preview.setAttribute('data-position', value);
 		}
 
 		templateRadios.forEach(function (radio) {
@@ -415,6 +497,8 @@
 			clearId: 'is-hero-image-clear',
 			mediaTitle: 'Select a hero image'
 		});
+
+		initGalleryPicker();
 
 		// "Open real preview": save an unsaved draft server-side and open
 		// the actual wp-login.php rendering it, instead of the stand-in

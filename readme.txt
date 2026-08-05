@@ -4,7 +4,7 @@ Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.23.0
+Stable tag: 1.24.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -189,6 +189,25 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.24.0 =
+* Improved: the Carousel login template is now a full-bleed, immersive
+  slideshow — the images fill the entire hero panel (with a slow Ken
+  Burns zoom and a legibility scrim) instead of the small framed box
+  they used to sit in, so photos actually read at a glance.
+* New: choosable carousel slide indicators — pick Bars (the original),
+  Dots, a numeric "1 / 4" counter, image Thumbnails, or None (arrows
+  only), from a dropdown on the Login Design screen.
+* New: a visual Media Library picker for the carousel gallery — add
+  images in a multi-select grid with thumbnail previews and per-image
+  remove buttons, instead of pasting URLs by hand. Manual URL entry is
+  still available under "Edit image URLs manually" for anyone who wants
+  it.
+* New: a third hero placement, "Center", alongside Left and Right — the
+  sign-in form floats as a frosted-glass card dead-center over a
+  full-screen backdrop: the template's gradient, your hero photo, or the
+  live carousel running full-bleed behind it. Works with every template
+  and stays responsive down to mobile.
 
 = 1.23.0 =
 * New: three more login templates, alongside the existing seven with no

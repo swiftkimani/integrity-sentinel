@@ -215,6 +215,91 @@ class LoginDesignTest extends TestCase {
 		$this->assertSame( $css_default, $css_bad );
 	}
 
+	public function test_build_css_centers_the_form_over_a_full_bleed_hero() {
+		$css = IS_Login_Design::build_css( array( 'template' => 'sunrise', 'hero_position' => 'center' ) );
+		// Full-bleed hero + centered card, not a left/right split.
+		$this->assertStringContainsString( '.is-login-hero{position:fixed;inset:0;width:100%', $css );
+		$this->assertStringContainsString( 'justify-content:center', $css );
+		$this->assertStringNotContainsString( '.is-login-hero{left:0;}', $css );
+		$this->assertStringNotContainsString( '.is-login-hero{right:0;}', $css );
+		// Frosted card wins over the solid-white default (appended after it).
+		$this->assertStringContainsString( 'backdrop-filter:blur(16px)', $css );
+	}
+
+	public function test_hero_position_validates_the_three_placements() {
+		$this->assertSame( 'left', IS_Login_Design::hero_position( array() ) );
+		$this->assertSame( 'right', IS_Login_Design::hero_position( array( 'hero_position' => 'right' ) ) );
+		$this->assertSame( 'center', IS_Login_Design::hero_position( array( 'hero_position' => 'center' ) ) );
+		$this->assertSame( 'left', IS_Login_Design::hero_position( array( 'hero_position' => 'sideways' ) ) );
+	}
+
+	// ---- carousel indicators ---------------------------------------------
+
+	public function test_carousel_indicator_defaults_to_bars_and_rejects_unknown() {
+		$this->assertSame( 'bars', IS_Login_Design::carousel_indicator( array() ) );
+		$this->assertSame( 'dots', IS_Login_Design::carousel_indicator( array( 'carousel_indicator' => 'dots' ) ) );
+		$this->assertSame( 'bars', IS_Login_Design::carousel_indicator( array( 'carousel_indicator' => 'sparkles' ) ) );
+	}
+
+	public function test_carousel_indicator_bars_is_the_default_dot_markup() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'     => 'carousel',
+				'hero_gallery' => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ),
+			)
+		);
+		$this->assertStringContainsString( 'is-carousel-dots is-ind-bars', $html );
+		$this->assertSame( 2, substr_count( $html, '<button type="button" class="is-carousel-dot' ) );
+	}
+
+	public function test_carousel_indicator_thumbnails_render_mini_images() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'           => 'carousel',
+				'carousel_indicator' => 'thumbnails',
+				'hero_gallery'       => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ),
+			)
+		);
+		$this->assertStringContainsString( 'is-ind-thumbs', $html );
+		$this->assertStringContainsString( '<button type="button" class="is-carousel-dot is-active"><img src="https://example.com/1.jpg"', $html );
+	}
+
+	public function test_carousel_indicator_numbers_render_a_counter_not_dots() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'           => 'carousel',
+				'carousel_indicator' => 'numbers',
+				'hero_gallery'       => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg' ),
+			)
+		);
+		$this->assertStringContainsString( 'is-carousel-counter', $html );
+		$this->assertStringContainsString( '<span class="is-carousel-total">3</span>', $html );
+		$this->assertStringNotContainsString( 'is-carousel-dot', $html );
+	}
+
+	public function test_carousel_indicator_none_keeps_arrows_but_drops_dots() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'           => 'carousel',
+				'carousel_indicator' => 'none',
+				'hero_gallery'       => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ),
+			)
+		);
+		$this->assertStringContainsString( 'is-carousel-prev', $html );
+		$this->assertStringNotContainsString( 'is-carousel-dot', $html );
+		$this->assertStringNotContainsString( 'is-carousel-counter', $html );
+	}
+
+	public function test_carousel_slides_are_full_bleed_with_a_scrim() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'     => 'carousel',
+				'hero_gallery' => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ),
+			)
+		);
+		$this->assertStringContainsString( 'is-carousel-scrim', $html );
+	}
+
 	public function test_build_css_suppresses_wordpress_logo_when_hide_branding_is_on() {
 		$css = IS_Login_Design::build_css( array( 'hide_branding' => 1 ) );
 		$this->assertStringContainsString( 'background-image:none', $css );

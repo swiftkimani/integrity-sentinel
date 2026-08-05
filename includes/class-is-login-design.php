@@ -4,12 +4,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Cosmetic layer for wp-login.php: seven built-in templates (one plain
- * centered card, six "split-screen" designs with a decorative hero
- * panel down either side, in the style of modern SaaS sign-in pages), a
+ * Cosmetic layer for wp-login.php: ten built-in templates (one plain
+ * centered card, nine "split-screen" designs with a decorative hero
+ * panel down either side, in the style of modern SaaS sign-in pages --
+ * including an interactive image Carousel with dot/arrow navigation, a
+ * monospace Terminal look, and a tilted-photo Polaroid style), a
  * customizer (accent color, logo, corner radius, hero position/heading/
- * subheading/image) layered on top, an escape hatch for raw custom CSS,
- * and an optional sanitized HTML banner above the form.
+ * subheading/image/gallery) layered on top, an escape hatch for raw
+ * custom CSS, and an optional sanitized HTML banner above the form.
  *
  * Two things this class deliberately owns beyond styling:
  *  - It scrubs every WordPress-branding surface on the login page (the
@@ -68,12 +70,15 @@ class IS_Login_Design {
 			'forest'       => __( 'Forest', 'integrity-sentinel' ),
 			'monochrome'   => __( 'Monochrome', 'integrity-sentinel' ),
 			'ocean'        => __( 'Ocean', 'integrity-sentinel' ),
+			'carousel'     => __( 'Carousel', 'integrity-sentinel' ),
+			'terminal'     => __( 'Terminal', 'integrity-sentinel' ),
+			'polaroid'     => __( 'Polaroid', 'integrity-sentinel' ),
 		);
 	}
 
 	/** Pure: which templates use the split-screen hero-panel layout (everything but the plain card). */
 	public static function is_split_template( $template ) {
-		return in_array( $template, array( 'sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean' ), true );
+		return in_array( $template, array( 'sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean', 'carousel', 'terminal', 'polaroid' ), true );
 	}
 
 	public static function default_settings() {
@@ -86,6 +91,7 @@ class IS_Login_Design {
 			'hero_heading'    => 'Welcome back',
 			'hero_subheading' => '',
 			'hero_image_url'  => '',
+			'hero_gallery'    => array(),
 			'hide_branding'   => 1,
 			'custom_css'      => '',
 			'custom_html'     => '',
@@ -188,10 +194,17 @@ class IS_Login_Design {
 			);
 		}
 
+		// Carousel and Polaroid render the hero image as a real <img> tag
+		// (build_hero_html()) instead of a full-bleed CSS background --
+		// applying the background-image rule too would visually fight
+		// with it, so it's skipped for just these two. Every other
+		// template's behavior here is completely unchanged.
+		$uses_img_tag = in_array( $template, array( 'carousel', 'polaroid' ), true );
+
 		if ( self::is_split_template( $template ) ) {
 			$css .= self::split_layout_css( $position );
 			$css .= self::template_hero_css( $template );
-			if ( '' !== $hero_img ) {
+			if ( '' !== $hero_img && ! $uses_img_tag ) {
 				$css .= sprintf(
 					'.is-login-hero{background-image:linear-gradient(180deg, rgba(15,15,25,.15), rgba(15,15,25,.6)), url("%s");background-size:cover;background-position:center;}.is-login-hero .is-login-blob{display:none;}',
 					self::css_safe_url( $hero_img )
@@ -321,6 +334,62 @@ class IS_Login_Design {
 					.is-login-blob-3{top:55%;left:30%;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.25);filter:blur(2px);}
 				';
 
+			case 'carousel':
+				// Layout differs from every other split template: heading
+				// on top, a framed <img> gallery below it (rendered by
+				// build_hero_html()/build_carousel_html()), dot/arrow
+				// controls at the bottom -- see carousel_js() for the
+				// (tiny, vanilla, dependency-free) interaction.
+				return $shared . '
+					.is-login-hero.is-login-carousel{justify-content:flex-start;padding-top:9vh;background:linear-gradient(160deg, #1a0b2e 0%, color-mix(in srgb, var(--is-login-color) 40%, #2d1b4e) 55%, #0f0620 100%);}
+					.is-login-carousel .is-login-hero-copy{margin-bottom:26px;}
+					.is-carousel-frame{position:relative;width:100%;max-width:420px;aspect-ratio:4/3;border-radius:calc(var(--is-login-radius) * 0.8);overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);}
+					.is-carousel-slide{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .6s ease;}
+					.is-carousel-slide.is-active{opacity:1;}
+					.is-carousel-controls{display:flex;align-items:center;gap:14px;margin-top:18px;}
+					.is-carousel-dots{display:flex;gap:6px;}
+					.is-carousel-dot{width:22px;height:3px;border-radius:2px;border:none;background:rgba(255,255,255,.3);cursor:pointer;padding:0;transition:background .2s ease, width .2s ease;}
+					.is-carousel-dot.is-active{background:#fff;width:34px;}
+					.is-carousel-prev,.is-carousel-next{width:36px;height:36px;flex:none;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;transition:background .2s ease;}
+					.is-carousel-prev:hover,.is-carousel-next:hover{background:rgba(255,255,255,.2);}
+				';
+
+			case 'terminal':
+				// A window-chrome bar (three "traffic light" dots drawn via
+				// box-shadow, not text/images) plus a blinking cursor after
+				// the heading -- generated blobs are switched off since
+				// soft blurred shapes clash with the sharp, geeky look.
+				return $shared . '
+					.is-login-hero{background:#0a0e14;font-family:"SF Mono",Monaco,"Cascadia Code","Roboto Mono",Consolas,monospace;}
+					.is-login-hero::before{content:"";position:absolute;top:0;left:0;right:0;height:34px;background:#161b22;border-bottom:1px solid rgba(255,255,255,.08);z-index:1;}
+					.is-login-hero::after{content:"";position:absolute;top:13px;left:16px;width:8px;height:8px;border-radius:50%;background:#ff5f56;box-shadow:16px 0 0 #ffbd2e, 32px 0 0 #27c93f;z-index:2;}
+					.is-login-hero-copy{position:relative;z-index:2;margin-top:44px;}
+					.is-login-hero-copy h2{font-family:inherit;color:color-mix(in srgb, var(--is-login-color) 65%, #7ee787);}
+					.is-login-hero-copy h2::after{content:"▍";display:inline-block;margin-left:4px;color:inherit;}
+					@media (prefers-reduced-motion: no-preference) {
+						.is-login-hero-copy h2::after{animation:is-login-blink 1s step-end infinite;}
+					}
+					@keyframes is-login-blink{50%{opacity:0;}}
+					.is-login-hero-copy p{font-family:inherit;color:#8b949e;font-size:13px;}
+					.is-login-blob{display:none;}
+				';
+
+			case 'polaroid':
+				// The hero image (if set) renders as a real, tilted,
+				// white-bordered <img> "photo" via build_hero_html(), not
+				// a full-bleed background -- see is-login-polaroid-photo.
+				return $shared . '
+					.is-login-hero{align-items:center;justify-content:center;text-align:center;background:linear-gradient(160deg, color-mix(in srgb, var(--is-login-color) 16%, #fdf6f0) 0%, color-mix(in srgb, var(--is-login-color) 10%, #fbeee6) 100%);}
+					.is-login-hero-copy{order:2;margin-top:22px;}
+					.is-login-hero-copy h2{color:#4a3f35;}
+					.is-login-hero-copy p{color:#8a7c6f;margin-left:auto;margin-right:auto;}
+					.is-login-polaroid-photo{order:1;width:78%;max-width:300px;background:#fff;padding:14px 14px 42px;box-shadow:0 18px 40px rgba(74,63,53,.25);transform:rotate(-4deg);border-radius:2px;}
+					.is-login-polaroid-photo img{display:block;width:100%;height:auto;aspect-ratio:1/1;object-fit:cover;border-radius:1px;}
+					.is-login-blob-1{top:6%;left:8%;width:50px;height:50px;background:rgba(255,255,255,.6);}
+					.is-login-blob-2{bottom:8%;right:10%;width:70px;height:70px;background:rgba(255,255,255,.4);}
+					.is-login-blob-3{display:none;}
+				';
+
 			case 'sunrise':
 			default:
 				return $shared . '
@@ -376,15 +445,26 @@ class IS_Login_Design {
 	 * title/heading/form remain untouched elsewhere on the page.
 	 */
 	public static function build_hero_html( array $settings ) {
-		$defaults   = self::default_settings();
-		$settings   = array_merge( $defaults, $settings );
-		$heading    = trim( (string) $settings['hero_heading'] );
-		$subheading = trim( (string) $settings['hero_subheading'] );
-		$has_image  = self::is_http_url( $settings['hero_image_url'] );
+		$defaults    = self::default_settings();
+		$settings    = array_merge( $defaults, $settings );
+		$template    = $settings['template'];
+		$heading     = trim( (string) $settings['hero_heading'] );
+		$subheading  = trim( (string) $settings['hero_subheading'] );
+		$has_image   = self::is_http_url( $settings['hero_image_url'] );
+		$is_polaroid = 'polaroid' === $template;
+
+		if ( 'carousel' === $template ) {
+			return self::build_carousel_html( $settings );
+		}
 
 		$html  = '<div class="is-login-hero" aria-hidden="true">';
 		$html .= '<span class="is-login-hero-scrim"></span>';
-		if ( ! $has_image ) {
+		if ( $is_polaroid && $has_image ) {
+			// A real <img>, not a background -- lets it take a genuine
+			// white photo-border + rotation via CSS border/transform,
+			// which a background-image can't do cleanly.
+			$html .= '<div class="is-login-polaroid-photo"><img src="' . htmlspecialchars( $settings['hero_image_url'], ENT_QUOTES, 'UTF-8' ) . '" alt=""></div>';
+		} elseif ( ! $has_image ) {
 			$html .= '<span class="is-login-blob is-login-blob-1"></span><span class="is-login-blob is-login-blob-2"></span><span class="is-login-blob is-login-blob-3"></span>';
 		}
 		$html .= '<div class="is-login-hero-copy">';
@@ -398,6 +478,121 @@ class IS_Login_Design {
 		return $html;
 	}
 
+	/**
+	 * Pure: the image list a Carousel template actually shows -- the
+	 * multi-image gallery if one is set, else the single hero_image_url
+	 * as a one-slide fallback (no dot/arrow controls render for a single
+	 * slide -- see build_carousel_html()), else empty (falls back to the
+	 * same generated blob pattern every other split template uses
+	 * without an image).
+	 */
+	public static function carousel_images( array $settings ) {
+		$gallery = isset( $settings['hero_gallery'] ) && is_array( $settings['hero_gallery'] ) ? $settings['hero_gallery'] : array();
+		$gallery = array_values( array_filter( $gallery, array( __CLASS__, 'is_http_url' ) ) );
+		if ( ! empty( $gallery ) ) {
+			return array_slice( $gallery, 0, 8 );
+		}
+		if ( self::is_http_url( $settings['hero_image_url'] ?? '' ) ) {
+			return array( $settings['hero_image_url'] );
+		}
+		return array();
+	}
+
+	/**
+	 * Pure: the Carousel template's hero markup -- a heading/subheading
+	 * above a framed image gallery, with dot/arrow controls when there's
+	 * more than one image. The controls are inert without JS (the first
+	 * image just shows statically); carousel_js() wires them up.
+	 */
+	private static function build_carousel_html( array $settings ) {
+		$heading    = trim( (string) $settings['hero_heading'] );
+		$subheading = trim( (string) $settings['hero_subheading'] );
+		$images     = self::carousel_images( $settings );
+
+		$html  = '<div class="is-login-hero is-login-carousel" aria-hidden="true">';
+		$html .= '<div class="is-login-hero-copy">';
+		if ( '' !== $heading ) {
+			$html .= '<h2>' . htmlspecialchars( $heading, ENT_QUOTES, 'UTF-8' ) . '</h2>';
+		}
+		if ( '' !== $subheading ) {
+			$html .= '<p>' . htmlspecialchars( $subheading, ENT_QUOTES, 'UTF-8' ) . '</p>';
+		}
+		$html .= '</div>';
+
+		if ( empty( $images ) ) {
+			$html .= '<span class="is-login-blob is-login-blob-1"></span><span class="is-login-blob is-login-blob-2"></span><span class="is-login-blob is-login-blob-3"></span>';
+			$html .= '</div>';
+			return $html;
+		}
+
+		$html .= '<div class="is-carousel-frame">';
+		foreach ( $images as $i => $url ) {
+			$html .= '<img class="is-carousel-slide' . ( 0 === $i ? ' is-active' : '' ) . '" src="' . htmlspecialchars( $url, ENT_QUOTES, 'UTF-8' ) . '" alt="">';
+		}
+		$html .= '</div>';
+
+		if ( count( $images ) > 1 ) {
+			$html .= '<div class="is-carousel-controls">';
+			$html .= '<button type="button" class="is-carousel-prev" aria-label="Previous">&larr;</button>';
+			$html .= '<div class="is-carousel-dots">';
+			foreach ( $images as $i => $url ) {
+				$html .= '<button type="button" class="is-carousel-dot' . ( 0 === $i ? ' is-active' : '' ) . '"></button>';
+			}
+			$html .= '</div>';
+			$html .= '<button type="button" class="is-carousel-next" aria-label="Next">&rarr;</button>';
+			$html .= '</div>';
+		}
+
+		$html .= '</div>';
+		return $html;
+	}
+
+	/**
+	 * Pure: the small, self-contained, dependency-free vanilla-JS
+	 * carousel controller -- no build step, matches this plugin's
+	 * existing JS elsewhere. Auto-advances every 6s unless the visitor's
+	 * OS-level prefers-reduced-motion is set; dot/arrow clicks always
+	 * work and reset the timer.
+	 */
+	public static function carousel_js() {
+		return <<<'JS'
+(function(){
+	var root = document.querySelector('.is-login-carousel');
+	if (!root) { return; }
+	var slides = root.querySelectorAll('.is-carousel-slide');
+	var dots = root.querySelectorAll('.is-carousel-dot');
+	var prevBtn = root.querySelector('.is-carousel-prev');
+	var nextBtn = root.querySelector('.is-carousel-next');
+	var index = 0;
+	var timer = null;
+
+	function show(i) {
+		index = (i + slides.length) % slides.length;
+		for (var n = 0; n < slides.length; n++) {
+			slides[n].classList.toggle('is-active', n === index);
+		}
+		for (var d = 0; d < dots.length; d++) {
+			dots[d].classList.toggle('is-active', d === index);
+		}
+	}
+	function restart() {
+		if (timer) { clearInterval(timer); }
+		if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			timer = setInterval(function () { show(index + 1); }, 6000);
+		}
+	}
+	for (var k = 0; k < dots.length; k++) {
+		(function (n) {
+			dots[n].addEventListener('click', function () { show(n); restart(); });
+		})(k);
+	}
+	if (prevBtn) { prevBtn.addEventListener('click', function () { show(index - 1); restart(); }); }
+	if (nextBtn) { nextBtn.addEventListener('click', function () { show(index + 1); restart(); }); }
+	restart();
+})();
+JS;
+	}
+
 	// ===================================================================
 	// WordPress glue
 	// ===================================================================
@@ -406,13 +601,19 @@ class IS_Login_Design {
 		IS_Guard::run(
 			'login_design',
 			function () {
-				$css = self::build_css( self::settings() );
-				if ( '' === trim( $css ) ) {
-					return;
+				$settings = self::settings();
+				$css      = self::build_css( $settings );
+				if ( '' !== trim( $css ) ) {
+					wp_register_style( 'is-login-design', false, array(), IS_VERSION );
+					wp_enqueue_style( 'is-login-design' );
+					wp_add_inline_style( 'is-login-design', $css );
 				}
-				wp_register_style( 'is-login-design', false, array(), IS_VERSION );
-				wp_enqueue_style( 'is-login-design' );
-				wp_add_inline_style( 'is-login-design', $css );
+
+				if ( 'carousel' === $settings['template'] && count( self::carousel_images( $settings ) ) > 1 ) {
+					wp_register_script( 'is-login-carousel', false, array(), IS_VERSION, true );
+					wp_enqueue_script( 'is-login-carousel' );
+					wp_add_inline_script( 'is-login-carousel', self::carousel_js() );
+				}
 			}
 		);
 	}

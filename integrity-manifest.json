@@ -1,8 +1,8 @@
 {
-    "assets/css/is-admin.css": "3901e730a9fc45ae747d9e32b733c38c4e1051f245e26b071afd8a69639d5ea3",
-    "assets/js/is-admin.js": "e77d9e1686a36ae6c72d8a09aab22b12de36b828c211fc3e6e12856cf63eae6a",
+    "assets/css/is-admin.css": "70e0120a45dc40d629902bd22e27f4194284ca668c7f90e72e7853a7de341376",
+    "assets/js/is-admin.js": "4e95d98b66cf7b8e7e9f5413092147d92fbd7137c7354228eac244ba2503eac8",
     "includes/class-is-2fa.php": "1a8cd2a4440c2c2bf8a541f5f7a3a3122b57e4fb8a6715f054f7e8fbe8d000e8",
-    "includes/class-is-admin.php": "9e12dd301784d85cfd9f88c121e89873bb3346ed3e0403693faea8b5c5585915",
+    "includes/class-is-admin.php": "4031e57a980687af69214b9b450a090e3e144cec166e4a94aeafe5e6ef5cae5c",
     "includes/class-is-ajax.php": "a99df7713c60ae99bcfeae62a28c53073eb38ab493fa53615e7c6ac22a24acb6",
     "includes/class-is-asset-cloak.php": "889a7c91bebed93d89360b1ad8923b203069723cf96ebd9a22ac9d0596ba9f1b",
     "includes/class-is-audit-log.php": "26a043fab8f92c25e905f7404b5d1d7f8edd7251205ffa8fc6cca5de84eb14bf",
@@ -18,7 +18,7 @@
     "includes/class-is-heuristics.php": "78854f4483ce1f3cb08b9d643f8d435612843a3828292d65f5ce2ce4d988bfdc",
     "includes/class-is-hotlink.php": "bef7fcbeb5a325fed168d3793d822b414ca2dc9269c9c38fe1c804af0034db1d",
     "includes/class-is-ip-list.php": "7b7617082db0d651ec86bb931ed6844eaf0a701419fd2e37ff1ec20f93fe9bcc",
-    "includes/class-is-login-design.php": "547ded26f9ca453218235233f5b5a668aa8b6760beb3af1c1435f586343a0c2e",
+    "includes/class-is-login-design.php": "9c8dc45918a71f0e1c6513a5b17fc14deca231fd1126509dfaa72598b0da3e26",
     "includes/class-is-login.php": "88543d7308809e89170cd4c55180c0862d96790a400d64c40ef771c804f5dab6",
     "includes/class-is-notifications.php": "4fe06aeedfd77272df788773fe255916a8685689cc80d782248298388fe2e972",
     "includes/class-is-password-policy.php": "b8ef80fb447d45b6074f0e0d35cd96e7e59df1f83862f03ad4dadd244adb4d4f",
@@ -32,6 +32,6 @@
     "includes/class-is-update-monitor.php": "3af2c1a01eff230f4f35e7069a3a50a106a20a84c7bdba1982d2364074fc52ff",
     "includes/class-is-upload-guard.php": "c0c98e530442494c5fef1f22a98041995e79dec41b672815bc71074f61cd69c9",
     "includes/class-is-vulnerability-scanner.php": "b2b5904e2164e125efff41019d49073c6e6960de9219600a5fac6f6b5bbac8b6",
-    "integrity-sentinel.php": "ff4282278826bba2a9a1e748c785dd4965172b4ca91e4020c46088291f57f421",
+    "integrity-sentinel.php": "f4e5324c52331f92bbeb3749743ccde3516325a3303352876a9beb08e23ce970",
     "uninstall.php": "31fd5d17ba898b944761a5c33c8a7c60336f412c87860d08d40bbe0a2950e6b3"
 }

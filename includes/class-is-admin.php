@@ -628,6 +628,24 @@ class IS_Admin {
 
 		$hero_position = isset( $input['hero_position'] ) && 'right' === $input['hero_position'] ? 'right' : 'left';
 
+		// One image URL per line (a textarea, not a repeater UI -- simple
+		// and robust). Only used by the Carousel template; harmless if
+		// present for any other template, since only Carousel ever reads
+		// it (IS_Login_Design::carousel_images()).
+		$raw_gallery_lines = isset( $input['hero_gallery'] ) ? preg_split( '/[\r\n]+/', (string) $input['hero_gallery'] ) : array();
+		$hero_gallery      = array();
+		foreach ( $raw_gallery_lines as $line ) {
+			$line = trim( $line );
+			if ( '' === $line ) {
+				continue;
+			}
+			$url = esc_url_raw( $line );
+			if ( IS_Login_Design::is_http_url( $url ) ) {
+				$hero_gallery[] = $url;
+			}
+		}
+		$hero_gallery = array_slice( array_values( array_unique( $hero_gallery ) ), 0, 8 );
+
 		return array(
 			'template'        => $template,
 			'logo_url'        => $logo,
@@ -637,6 +655,7 @@ class IS_Admin {
 			'hero_heading'    => isset( $input['hero_heading'] ) ? sanitize_text_field( $input['hero_heading'] ) : '',
 			'hero_subheading' => isset( $input['hero_subheading'] ) ? sanitize_text_field( $input['hero_subheading'] ) : '',
 			'hero_image_url'  => $hero_image,
+			'hero_gallery'    => $hero_gallery,
 			'hide_branding'   => empty( $input['hide_branding'] ) ? 0 : 1,
 			'custom_css'      => IS_Login_Design::sanitize_css_for_style_tag( isset( $input['custom_css'] ) ? (string) $input['custom_css'] : '' ),
 			'custom_html'     => isset( $input['custom_html'] ) ? wp_kses_post( $input['custom_html'] ) : '',
@@ -2343,6 +2362,13 @@ class IS_Admin {
 									<button type="button" class="button-link" id="is-hero-image-clear" style="<?php echo '' === $design['hero_image_url'] ? 'display:none;' : ''; ?>"><?php esc_html_e( 'Remove', 'integrity-sentinel' ); ?></button>
 								</div>
 								<p class="description"><?php esc_html_e( 'Optional. Without one, a soft generated pattern is used instead — pick your own photo or illustration for something more "you".', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr id="is-carousel-gallery-row" style="<?php echo 'carousel' === $design['template'] ? '' : 'display:none;'; ?>">
+							<th scope="row"><label for="is-hero-gallery"><?php esc_html_e( 'Carousel images', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<textarea id="is-hero-gallery" name="is_login_design_settings[hero_gallery]" rows="4" class="large-text code" placeholder="https://example.com/photo-1.jpg&#10;https://example.com/photo-2.jpg&#10;https://example.com/photo-3.jpg"><?php echo esc_textarea( implode( "\n", $design['hero_gallery'] ) ); ?></textarea>
+								<p class="description"><?php esc_html_e( 'Only used by the "Carousel" template — one image URL per line, up to 8. Two or more shows dot/arrow navigation to cycle through them; one behaves like a normal static image; none falls back to a generated pattern.', 'integrity-sentinel' ); ?></p>
 							</td>
 						</tr>
 					</table>

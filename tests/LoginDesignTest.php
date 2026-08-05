@@ -64,7 +64,7 @@ class LoginDesignTest extends TestCase {
 	// ---- is_split_template -------------------------------------------------
 
 	public function test_split_templates_have_a_hero_panel() {
-		foreach ( array( 'sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean' ) as $template ) {
+		foreach ( array( 'sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean', 'carousel', 'terminal', 'polaroid' ) as $template ) {
 			$this->assertTrue( IS_Login_Design::is_split_template( $template ), $template );
 		}
 	}
@@ -194,8 +194,8 @@ class LoginDesignTest extends TestCase {
 		}
 	}
 
-	public function test_build_css_has_seven_templates() {
-		$this->assertCount( 7, IS_Login_Design::templates() );
+	public function test_build_css_has_ten_templates() {
+		$this->assertCount( 10, IS_Login_Design::templates() );
 	}
 
 	public function test_build_css_places_hero_on_the_left_by_default() {
@@ -258,5 +258,109 @@ class LoginDesignTest extends TestCase {
 	public function test_build_hero_html_is_marked_decorative() {
 		$html = IS_Login_Design::build_hero_html( array() );
 		$this->assertStringContainsString( 'aria-hidden="true"', $html );
+	}
+
+	// ---- carousel_images -------------------------------------------------
+
+	public function test_carousel_images_uses_the_gallery_when_set() {
+		$images = IS_Login_Design::carousel_images(
+			array(
+				'hero_gallery'   => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ),
+				'hero_image_url' => 'https://example.com/ignored.jpg',
+			)
+		);
+		$this->assertSame( array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ), $images );
+	}
+
+	public function test_carousel_images_falls_back_to_the_single_hero_image() {
+		$images = IS_Login_Design::carousel_images( array( 'hero_gallery' => array(), 'hero_image_url' => 'https://example.com/solo.jpg' ) );
+		$this->assertSame( array( 'https://example.com/solo.jpg' ), $images );
+	}
+
+	public function test_carousel_images_is_empty_when_nothing_is_set() {
+		$this->assertSame( array(), IS_Login_Design::carousel_images( array( 'hero_gallery' => array(), 'hero_image_url' => '' ) ) );
+	}
+
+	public function test_carousel_images_filters_out_non_http_urls() {
+		$images = IS_Login_Design::carousel_images( array( 'hero_gallery' => array( 'javascript:alert(1)', 'https://example.com/ok.jpg' ) ) );
+		$this->assertSame( array( 'https://example.com/ok.jpg' ), $images );
+	}
+
+	public function test_carousel_images_caps_at_eight() {
+		$gallery = array();
+		for ( $i = 0; $i < 12; $i++ ) {
+			$gallery[] = "https://example.com/{$i}.jpg";
+		}
+		$images = IS_Login_Design::carousel_images( array( 'hero_gallery' => $gallery ) );
+		$this->assertCount( 8, $images );
+	}
+
+	// ---- new templates: carousel/terminal/polaroid ---------------------------
+
+	public function test_build_css_is_stable_for_carousel_terminal_and_polaroid() {
+		foreach ( array( 'carousel', 'terminal', 'polaroid' ) as $template ) {
+			$css = IS_Login_Design::build_css( array( 'template' => $template ) );
+			$this->assertNotSame( '', trim( $css ), $template );
+		}
+	}
+
+	public function test_carousel_hero_html_renders_every_image_with_only_the_first_active() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'     => 'carousel',
+				'hero_gallery' => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg' ),
+			)
+		);
+		$this->assertSame( 3, substr_count( $html, 'is-carousel-slide' ) );
+		$this->assertStringContainsString( 'is-carousel-slide is-active" src="https://example.com/1.jpg"', $html );
+		$this->assertStringNotContainsString( 'is-carousel-slide is-active" src="https://example.com/2.jpg"', $html );
+	}
+
+	public function test_carousel_hero_html_shows_controls_only_with_multiple_images() {
+		$single = IS_Login_Design::build_hero_html( array( 'template' => 'carousel', 'hero_gallery' => array( 'https://example.com/1.jpg' ) ) );
+		$this->assertStringNotContainsString( 'is-carousel-controls', $single );
+
+		$multi = IS_Login_Design::build_hero_html( array( 'template' => 'carousel', 'hero_gallery' => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ) ) );
+		$this->assertStringContainsString( 'is-carousel-controls', $multi );
+		// 'is-carousel-dot' is a prefix of the wrapping 'is-carousel-dots'
+		// container's own class, so match the dot buttons specifically.
+		$this->assertSame( 2, substr_count( $multi, '<button type="button" class="is-carousel-dot' ) );
+	}
+
+	public function test_carousel_hero_html_falls_back_to_blobs_with_no_images() {
+		$html = IS_Login_Design::build_hero_html( array( 'template' => 'carousel', 'hero_gallery' => array(), 'hero_image_url' => '' ) );
+		$this->assertStringContainsString( 'is-login-blob', $html );
+		$this->assertStringNotContainsString( 'is-carousel-frame', $html );
+	}
+
+	public function test_carousel_hero_html_escapes_image_urls() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'     => 'carousel',
+				'hero_gallery' => array( 'https://example.com/"><script>alert(1)</script>.jpg' ),
+			)
+		);
+		$this->assertStringNotContainsString( '<script>alert(1)</script>', $html );
+	}
+
+	public function test_polaroid_renders_a_real_img_tag_not_a_css_background() {
+		$html = IS_Login_Design::build_hero_html( array( 'template' => 'polaroid', 'hero_image_url' => 'https://example.com/photo.jpg' ) );
+		$this->assertStringContainsString( 'is-login-polaroid-photo', $html );
+		$this->assertStringContainsString( '<img src="https://example.com/photo.jpg" alt="">', $html );
+
+		$css = IS_Login_Design::build_css( array( 'template' => 'polaroid', 'hero_image_url' => 'https://example.com/photo.jpg' ) );
+		$this->assertStringNotContainsString( 'background-image:linear-gradient(180deg', $css );
+	}
+
+	public function test_terminal_hides_generated_blobs_even_without_an_image() {
+		$css = IS_Login_Design::build_css( array( 'template' => 'terminal' ) );
+		$this->assertStringContainsString( '.is-login-blob{display:none;}', $css );
+	}
+
+	public function test_carousel_js_targets_the_expected_dom_hooks() {
+		$js = IS_Login_Design::carousel_js();
+		foreach ( array( 'is-login-carousel', 'is-carousel-slide', 'is-carousel-dot', 'is-carousel-prev', 'is-carousel-next', 'prefers-reduced-motion' ) as $needle ) {
+			$this->assertStringContainsString( $needle, $js );
+		}
 	}
 }

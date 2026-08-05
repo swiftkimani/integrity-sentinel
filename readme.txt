@@ -4,7 +4,7 @@ Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.22.0
+Stable tag: 1.23.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -189,6 +189,21 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.23.0 =
+* New: three more login templates, alongside the existing seven with no
+  changes to any of them (verified with a byte-for-byte regression
+  check before release):
+  - Carousel — a real interactive image slider with dot and arrow
+    navigation and auto-advance, for a heading/subheading plus up to 8
+    images (one URL per line). One image behaves like a normal static
+    photo; none falls back to the usual generated pattern. Small
+    vanilla-JS controller, no dependencies, respects
+    prefers-reduced-motion.
+  - Terminal — a dark, monospace, code-editor-styled hero panel with a
+    window-chrome title bar and a blinking cursor after the heading.
+  - Polaroid — the hero photo renders as a tilted, white-bordered print
+    instead of a full-bleed background.
 
 = 1.22.0 =
 * New: known-vulnerability scanning — checks installed plugins and the

@@ -64,6 +64,8 @@ require_once dirname( __DIR__ ) . '/includes/class-is-totp.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-2fa.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-sessions.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-asset-cloak.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-password-policy.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-vulnerability-scanner.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-cron.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-scanner.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-quarantine.php';

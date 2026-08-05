@@ -29,12 +29,14 @@ class IS_Headers {
 
 	public static function default_settings() {
 		return array(
-			'security_headers'       => 1,
-			'prevent_clickjacking'   => 1,
-			'hide_wp_version'        => 1,
-			'hide_meta_fingerprints' => 1,
-			'disable_xmlrpc'         => 0,
-			'disable_feeds'          => 0,
+			'security_headers'        => 1,
+			'prevent_clickjacking'    => 1,
+			'hide_wp_version'         => 1,
+			'hide_meta_fingerprints'  => 1,
+			'disable_xmlrpc'          => 0,
+			'disable_feeds'           => 0,
+			'content_security_policy' => '',
+			'csp_report_only'         => 1,
 		);
 	}
 
@@ -79,15 +81,52 @@ class IS_Headers {
 		}
 
 		if ( ! empty( $settings['prevent_clickjacking'] ) ) {
-			// Both sent together: X-Frame-Options for older browsers,
-			// frame-ancestors (the modern, more flexible replacement) for
-			// current ones. SAMEORIGIN/'self' rather than DENY/'none' so a
-			// site's own admin/customizer preview iframes keep working.
-			$headers['X-Frame-Options']         = 'SAMEORIGIN';
-			$headers['Content-Security-Policy'] = "frame-ancestors 'self'";
+			// Older-browser fallback; frame-ancestors (below, part of the
+			// CSP header) is the modern, more flexible replacement.
+			// SAMEORIGIN rather than DENY so a site's own admin/customizer
+			// preview iframes keep working.
+			$headers['X-Frame-Options'] = 'SAMEORIGIN';
+		}
+
+		$csp = self::build_csp( $settings );
+		if ( '' !== $csp ) {
+			// Report-only sends violations to the browser console (and an
+			// optional report-uri) without blocking anything -- the safe
+			// way to test a policy on a site whose exact plugin/theme
+			// asset mix isn't known in advance.
+			$header_name             = ! empty( $settings['csp_report_only'] ) ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy';
+			$headers[ $header_name ] = $csp;
 		}
 
 		return $headers;
+	}
+
+	/**
+	 * Pure: assembles the effective Content-Security-Policy string, or ''
+	 * to send no CSP header at all. With the full policy feature off,
+	 * this preserves the previous behavior exactly -- a bare
+	 * frame-ancestors directive whenever clickjacking protection is on,
+	 * nothing otherwise. With a full policy set, frame-ancestors is
+	 * folded into it (rather than sent as a second, separate directive)
+	 * unless the admin's own policy already specifies one.
+	 */
+	public static function build_csp( array $settings ) {
+		$policy = trim( (string) ( $settings['content_security_policy'] ?? '' ) );
+
+		if ( '' === $policy ) {
+			return ! empty( $settings['prevent_clickjacking'] ) ? "frame-ancestors 'self'" : '';
+		}
+
+		if ( ! empty( $settings['prevent_clickjacking'] ) && false === stripos( $policy, 'frame-ancestors' ) ) {
+			$policy = rtrim( $policy, "; \t\n\r" ) . "; frame-ancestors 'self'";
+		}
+
+		return $policy;
+	}
+
+	/** A conservative, WordPress-compatible starting policy -- permissive enough not to break a typical theme/plugin mix, while still closing off the classic object-embed and base-tag-hijack vectors. Pre-fills the settings textarea; not auto-applied. */
+	public static function suggested_csp() {
+		return "default-src 'self' https: data:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data:; font-src 'self' https: data:; object-src 'none'; base-uri 'self';";
 	}
 
 	/**

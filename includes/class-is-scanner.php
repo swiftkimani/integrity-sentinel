@@ -178,10 +178,11 @@ class IS_Scanner {
 	private function complete_run( $run_id, $run ) {
 		$self_findings      = $this->check_self_integrity( $run_id );
 		$hardening_findings = ( new IS_Hardening() )->run_checks( $run_id, $this->db );
+		$vuln_findings      = ( new IS_Vulnerability_Scanner() )->run_checks( $run_id, $this->db );
 		$core_result        = $this->check_core_integrity( $run_id );
 		$plugin_result      = $this->check_plugin_integrity( $run_id );
 
-		$extra_findings = $self_findings + $hardening_findings;
+		$extra_findings = $self_findings + $hardening_findings + $vuln_findings;
 		if ( ! is_wp_error( $core_result ) ) {
 			$extra_findings += (int) $core_result;
 		}

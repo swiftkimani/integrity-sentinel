@@ -43,6 +43,89 @@ class HeadersTest extends TestCase {
 		$this->assertStringContainsString( "'self'", $headers['Content-Security-Policy'] );
 	}
 
+	public function test_no_csp_header_when_both_clickjacking_and_policy_are_off() {
+		$headers = IS_Headers::security_header_lines(
+			array(
+				'prevent_clickjacking'    => 0,
+				'content_security_policy' => '',
+			)
+		);
+		$this->assertArrayNotHasKey( 'Content-Security-Policy', $headers );
+		$this->assertArrayNotHasKey( 'Content-Security-Policy-Report-Only', $headers );
+	}
+
+	// ---- build_csp -------------------------------------------------------
+
+	public function test_build_csp_is_empty_when_nothing_enabled() {
+		$this->assertSame( '', IS_Headers::build_csp( array( 'prevent_clickjacking' => 0, 'content_security_policy' => '' ) ) );
+	}
+
+	public function test_build_csp_falls_back_to_bare_frame_ancestors() {
+		$this->assertSame(
+			"frame-ancestors 'self'",
+			IS_Headers::build_csp( array( 'prevent_clickjacking' => 1, 'content_security_policy' => '' ) )
+		);
+	}
+
+	public function test_build_csp_uses_the_custom_policy_verbatim_when_clickjacking_is_off() {
+		$policy = "default-src 'self'; object-src 'none';";
+		$this->assertSame(
+			$policy,
+			IS_Headers::build_csp( array( 'prevent_clickjacking' => 0, 'content_security_policy' => $policy ) )
+		);
+	}
+
+	public function test_build_csp_folds_frame_ancestors_into_a_custom_policy() {
+		$result = IS_Headers::build_csp(
+			array(
+				'prevent_clickjacking'    => 1,
+				'content_security_policy' => "default-src 'self'; object-src 'none';",
+			)
+		);
+		$this->assertStringContainsString( "default-src 'self'", $result );
+		$this->assertStringContainsString( "frame-ancestors 'self'", $result );
+	}
+
+	public function test_build_csp_does_not_duplicate_an_existing_frame_ancestors_directive() {
+		$policy = "default-src 'self'; frame-ancestors 'none';";
+		$result = IS_Headers::build_csp( array( 'prevent_clickjacking' => 1, 'content_security_policy' => $policy ) );
+		$this->assertSame( 1, substr_count( $result, 'frame-ancestors' ) );
+		// The admin's own directive wins -- not silently overridden.
+		$this->assertStringContainsString( "frame-ancestors 'none'", $result );
+	}
+
+	public function test_security_header_lines_uses_report_only_header_name_when_configured() {
+		$headers = IS_Headers::security_header_lines(
+			array(
+				'prevent_clickjacking'    => 0,
+				'content_security_policy' => "default-src 'self';",
+				'csp_report_only'         => 1,
+			)
+		);
+		$this->assertArrayHasKey( 'Content-Security-Policy-Report-Only', $headers );
+		$this->assertArrayNotHasKey( 'Content-Security-Policy', $headers );
+	}
+
+	public function test_security_header_lines_uses_enforcing_header_name_when_report_only_is_off() {
+		$headers = IS_Headers::security_header_lines(
+			array(
+				'prevent_clickjacking'    => 0,
+				'content_security_policy' => "default-src 'self';",
+				'csp_report_only'         => 0,
+			)
+		);
+		$this->assertArrayHasKey( 'Content-Security-Policy', $headers );
+		$this->assertArrayNotHasKey( 'Content-Security-Policy-Report-Only', $headers );
+	}
+
+	// ---- suggested_csp -----------------------------------------------------
+
+	public function test_suggested_csp_blocks_object_embeds_and_locks_base_uri() {
+		$csp = IS_Headers::suggested_csp();
+		$this->assertStringContainsString( "object-src 'none'", $csp );
+		$this->assertStringContainsString( "base-uri 'self'", $csp );
+	}
+
 	// ---- generator_value ---------------------------------------------
 
 	public function test_generator_kept_when_hide_version_off() {
@@ -87,5 +170,6 @@ class HeadersTest extends TestCase {
 		$this->assertSame( 1, $defaults['hide_meta_fingerprints'] );
 		$this->assertSame( 0, $defaults['disable_xmlrpc'] );
 		$this->assertSame( 0, $defaults['disable_feeds'] );
+		$this->assertSame( '', $defaults['content_security_policy'] );
 	}
 }

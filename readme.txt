@@ -4,7 +4,7 @@ Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.21.0
+Stable tag: 1.22.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -189,6 +189,26 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.22.0 =
+* New: known-vulnerability scanning — checks installed plugins and the
+  active theme against the WPScan Vulnerability Database on every scan,
+  reporting matches with severity, CVE references, and the fixed
+  version. Catches what file-integrity checking structurally can't: a
+  completely untampered plugin with a known, published, unpatched CVE.
+  Opt-in (needs a free WPScan API key), off by default.
+* New: password strength policy — WordPress core's own strength meter
+  is advisory only and still accepts a weak password; this actually
+  rejects one, on both the "forgot password" reset flow and profile/
+  user-edit password changes. Configurable minimum length and
+  character-class requirements, plus a always-on common-password
+  blocklist once enabled. Off by default.
+* New: a real, configurable Content-Security-Policy header, alongside
+  the existing minimal clickjacking-only one (which still works exactly
+  as before if this isn't touched). Off by default, with a report-only
+  mode to test safely before enforcing, and a suggested starting policy
+  that closes off the classic object-embed and base-tag-hijack vectors
+  without breaking a typical theme/plugin's inline scripts/styles.
 
 = 1.21.0 =
 * Fixed: a real bug where an uploaded login logo never actually

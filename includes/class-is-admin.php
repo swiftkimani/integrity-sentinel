@@ -326,6 +326,66 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_asset_cloak_settings' ),
 			)
 		);
+		register_setting(
+			'is_password_policy_settings_group',
+			'is_password_policy_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_password_policy_settings' ),
+			)
+		);
+		register_setting(
+			'is_vulnerability_scanner_settings_group',
+			'is_vulnerability_scanner_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_vulnerability_scanner_settings' ),
+			)
+		);
+	}
+
+	public function sanitize_vulnerability_scanner_settings( $input ) {
+		$old     = IS_Vulnerability_Scanner::settings();
+		$api_key = isset( $input['api_key'] ) ? sanitize_text_field( trim( (string) $input['api_key'] ) ) : '';
+		$enabled = empty( $input['enabled'] ) ? 0 : 1;
+
+		if ( $enabled && '' === $api_key ) {
+			add_settings_error(
+				'is_vulnerability_scanner_settings',
+				'is_vuln_scanner_key_required',
+				__( 'A WPScan API key is required to enable vulnerability scanning — it was left off. Get a free key at wpscan.com/register.', 'integrity-sentinel' )
+			);
+			$enabled = 0;
+		}
+
+		$out = array(
+			'enabled' => $enabled,
+			'api_key' => $api_key,
+		);
+
+		if ( $out !== $old ) {
+			// The key itself isn't logged -- only whether the feature's on.
+			IS_Audit_Log::record( 'vulnerability_scanner_settings_changed', array( 'enabled' => $out['enabled'] ) );
+		}
+
+		return $out;
+	}
+
+	public function sanitize_password_policy_settings( $input ) {
+		$old = IS_Password_Policy::settings();
+		$out = array(
+			'enabled'            => empty( $input['enabled'] ) ? 0 : 1,
+			'min_length'         => max( 4, min( 64, (int) ( $input['min_length'] ?? 12 ) ) ),
+			'require_mixed_case' => empty( $input['require_mixed_case'] ) ? 0 : 1,
+			'require_number'     => empty( $input['require_number'] ) ? 0 : 1,
+			'require_symbol'     => empty( $input['require_symbol'] ) ? 0 : 1,
+		);
+
+		if ( $out !== $old ) {
+			IS_Audit_Log::record( 'password_policy_changed', array( 'settings' => $out ) );
+		}
+
+		return $out;
 	}
 
 	public function sanitize_session_settings( $input ) {
@@ -661,6 +721,16 @@ class IS_Admin {
 		$old = IS_Headers::settings();
 		$out = array();
 		foreach ( array_keys( IS_Headers::default_settings() ) as $key ) {
+			if ( 'content_security_policy' === $key ) {
+				// A free-text header value, not a toggle -- stripped of
+				// tags and any literal line breaks (a raw newline here
+				// would be HTTP header-injection input; header() itself
+				// already rejects that, but there's no reason to store an
+				// invalid value in the first place).
+				$raw         = isset( $input[ $key ] ) ? (string) $input[ $key ] : '';
+				$out[ $key ] = trim( (string) preg_replace( '/[\r\n]+/', ' ', sanitize_textarea_field( $raw ) ) );
+				continue;
+			}
 			$out[ $key ] = empty( $input[ $key ] ) ? 0 : 1;
 		}
 
@@ -1521,6 +1591,8 @@ class IS_Admin {
 
 			<?php $this->render_asset_cloak_section(); ?>
 
+			<?php $this->render_vulnerability_scanner_section(); ?>
+
 			<h2><?php esc_html_e( 'Hardening checks', 'integrity-sentinel' ); ?></h2>
 			<p>
 				<?php esc_html_e( 'Every scan also audits site configuration: the file editor, debug output, auth salts, world-writable paths, exposed .git/.env/debug.log files, backup archives in the webroot, administrator accounts, plugins closed on WordPress.org, and more. Results appear under Findings alongside file-integrity issues.', 'integrity-sentinel' ); ?>
@@ -1714,6 +1786,25 @@ class IS_Admin {
 						<p class="description"><?php esc_html_e( 'Only enable this if the site has no RSS subscribers or feed-consuming integrations.', 'integrity-sentinel' ); ?></p>
 					</td>
 				</tr>
+				<tr>
+					<th scope="row"><label for="is_csp_policy"><?php esc_html_e( 'Content-Security-Policy', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<textarea id="is_csp_policy" name="is_hardening_settings[content_security_policy]" rows="4" class="large-text code" placeholder="<?php echo esc_attr( IS_Headers::suggested_csp() ); ?>"><?php echo esc_textarea( $settings['content_security_policy'] ); ?></textarea>
+						<p class="description">
+							<?php
+							printf(
+								/* translators: %s: a ready-to-use suggested policy string */
+								esc_html__( 'Empty = off. A reasonable starting point that rarely breaks a typical WordPress theme/plugin mix: %s — copy it in and adjust as needed.', 'integrity-sentinel' ),
+								'<code>' . esc_html( IS_Headers::suggested_csp() ) . '</code>'
+							);
+							?>
+						</p>
+						<label style="display:block;margin-top:6px;">
+							<input type="checkbox" name="is_hardening_settings[csp_report_only]" value="1" <?php checked( $settings['csp_report_only'], 1 ); ?>>
+							<?php esc_html_e( 'Report-only — log violations to the browser console without blocking anything. Recommended while testing; a wrong policy in enforcing mode can break scripts/styles sitewide.', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
 			</table>
 			<?php submit_button( __( 'Save HTTP hardening settings', 'integrity-sentinel' ) ); ?>
 		</form>
@@ -1786,6 +1877,60 @@ class IS_Admin {
 			<?php esc_html_e( 'Save an alias above first. Applying writes a marked rule block to the TOP of the root .htaccess (ahead of WordPress\'s own rules — required for it to work at all) and preserves everything else already in the file; removing deletes only that block. Apache/LiteSpeed only — nginx needs this added to your server config manually:', 'integrity-sentinel' ); ?>
 		</p>
 		<pre><?php echo esc_html( IS_Asset_Cloak::nginx_snippet( $settings['alias'] ) ); ?></pre>
+		<?php
+	}
+
+	/**
+	 * Known-vulnerability scanning against the WPScan Vulnerability
+	 * Database -- catches the class of risk file-integrity checking
+	 * can't: an untampered plugin with a known, published CVE in the
+	 * exact installed version.
+	 */
+	private function render_vulnerability_scanner_section() {
+		$settings = IS_Vulnerability_Scanner::settings();
+		?>
+		<h2><?php esc_html_e( 'Known-vulnerability scanning', 'integrity-sentinel' ); ?></h2>
+		<p>
+			<?php esc_html_e( 'File-integrity checking confirms nothing has been tampered with — it can\'t tell you a completely untampered plugin has a known, published vulnerability in the exact version installed. This checks installed plugins and the active theme against the WPScan Vulnerability Database on every scan and reports any that match, with severity, a CVE reference where available, and the version that fixes it.', 'integrity-sentinel' ); ?>
+		</p>
+		<p class="description">
+			<?php
+			printf(
+				/* translators: %s: link to wpscan.com/register */
+				wp_kses(
+					__( 'Requires a free WPScan API key (25 requests/day) — <a href="%s" target="_blank" rel="noopener noreferrer">register at wpscan.com</a>. Off by default since, unlike the WordPress.org lookups elsewhere in this plugin, it depends on a key only you can provide.', 'integrity-sentinel' ),
+					array(
+						'a' => array(
+							'href'   => array(),
+							'target' => array(),
+							'rel'    => array(),
+						),
+					)
+				),
+				'https://wpscan.com/register'
+			);
+			?>
+		</p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_vulnerability_scanner_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="is_vuln_api_key"><?php esc_html_e( 'WPScan API key', 'integrity-sentinel' ); ?></label></th>
+					<td><input type="text" id="is_vuln_api_key" name="is_vulnerability_scanner_settings[api_key]" value="<?php echo esc_attr( $settings['api_key'] ); ?>" class="regular-text" autocomplete="off"></td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_vulnerability_scanner_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Check installed plugins/theme for known vulnerabilities on every scan.', 'integrity-sentinel' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'A large plugin list is covered across a few scans rather than all at once, to stay within the free tier\'s daily quota.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save vulnerability scanning settings', 'integrity-sentinel' ) ); ?>
+		</form>
 		<?php
 	}
 
@@ -1898,9 +2043,10 @@ class IS_Admin {
 			return;
 		}
 		settings_errors( 'is_login_rename_settings' );
-		$rename     = IS_Login::rename_settings();
-		$throttle   = IS_Login::throttle_settings();
-		$two_factor = IS_2FA::settings();
+		$rename          = IS_Login::rename_settings();
+		$throttle        = IS_Login::throttle_settings();
+		$two_factor      = IS_2FA::settings();
+		$password_policy = IS_Password_Policy::settings();
 		$this->render_shell_open( 'login' );
 		?>
 		<div class="wrap is-wrap">
@@ -1980,6 +2126,46 @@ class IS_Admin {
 					</tr>
 				</table>
 				<?php submit_button( __( 'Save rate limiting settings', 'integrity-sentinel' ) ); ?>
+			</form>
+
+			<h2><?php esc_html_e( 'Password strength policy', 'integrity-sentinel' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'WordPress\'s own strength meter is advisory only — it shows a color and a label but still accepts a weak password. This actually blocks one, on both the "forgot password" reset flow and profile/user-edit password changes (including new users created from wp-admin).', 'integrity-sentinel' ); ?></p>
+			<form method="post" action="options.php">
+				<?php settings_fields( 'is_password_policy_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_password_policy_settings[enabled]" value="1" <?php checked( $password_policy['enabled'], 1 ); ?>>
+								<?php esc_html_e( 'Reject a new password that doesn\'t meet the rules below.', 'integrity-sentinel' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_pw_min_length"><?php esc_html_e( 'Minimum length', 'integrity-sentinel' ); ?></label></th>
+						<td><input type="number" min="4" max="64" id="is_pw_min_length" name="is_password_policy_settings[min_length]" value="<?php echo esc_attr( $password_policy['min_length'] ); ?>" class="small-text"></td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Character requirements', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label style="display:block;">
+								<input type="checkbox" name="is_password_policy_settings[require_mixed_case]" value="1" <?php checked( $password_policy['require_mixed_case'], 1 ); ?>>
+								<?php esc_html_e( 'Require both uppercase and lowercase letters.', 'integrity-sentinel' ); ?>
+							</label>
+							<label style="display:block;">
+								<input type="checkbox" name="is_password_policy_settings[require_number]" value="1" <?php checked( $password_policy['require_number'], 1 ); ?>>
+								<?php esc_html_e( 'Require at least one number.', 'integrity-sentinel' ); ?>
+							</label>
+							<label style="display:block;">
+								<input type="checkbox" name="is_password_policy_settings[require_symbol]" value="1" <?php checked( $password_policy['require_symbol'], 1 ); ?>>
+								<?php esc_html_e( 'Require at least one symbol (e.g. !@#$%).', 'integrity-sentinel' ); ?>
+							</label>
+							<p class="description"><?php esc_html_e( 'A short list of extremely common passwords (password1, welcome1, ...) is always rejected once enabled, regardless of these rules.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save password policy', 'integrity-sentinel' ) ); ?>
 			</form>
 
 			<h2><?php esc_html_e( 'Two-factor authentication', 'integrity-sentinel' ); ?></h2>

@@ -524,6 +524,49 @@
 .is-tpl-ocean .is-template-swatch-hero {
 	background: linear-gradient(170deg, #0c4a6e 0%, #0369a1 45%, #164e63 100%);
 }
+.is-tpl-carousel .is-template-swatch-hero {
+	background: linear-gradient(160deg, #1a0b2e 0%, #2d1b4e 55%, #0f0620 100%);
+	position: relative;
+}
+.is-tpl-carousel .is-template-swatch-hero::after {
+	content: "";
+	position: absolute;
+	inset: 14px 10px 10px;
+	border: 1px solid rgba(255, 255, 255, 0.35);
+	border-radius: 4px;
+	background: rgba(255, 255, 255, 0.08);
+}
+.is-tpl-terminal .is-template-swatch-hero {
+	background: #0a0e14;
+	position: relative;
+}
+.is-tpl-terminal .is-template-swatch-hero::before {
+	content: "";
+	position: absolute;
+	top: 6px;
+	left: 8px;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: #ff5f56;
+	box-shadow: 9px 0 0 #ffbd2e, 18px 0 0 #27c93f;
+}
+.is-tpl-polaroid .is-template-swatch-hero {
+	background: linear-gradient(160deg, #fdf6f0 0%, #fbeee6 100%);
+	position: relative;
+}
+.is-tpl-polaroid .is-template-swatch-hero::after {
+	content: "";
+	position: absolute;
+	width: 26px;
+	height: 26px;
+	background: #fff;
+	border-radius: 1px;
+	box-shadow: 0 4px 8px rgba(74, 63, 53, 0.3);
+	top: 16px;
+	left: 50%;
+	transform: translateX(-50%) rotate(-6deg);
+}
 
 .is-login-preview-pane { position: sticky; top: 48px; }
 

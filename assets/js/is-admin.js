@@ -249,7 +249,7 @@
 	// Login Design: template grid + live preview + media picker
 	// ---------------------------------------------------------------
 
-	var SPLIT_TEMPLATES = ['sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean'];
+	var SPLIT_TEMPLATES = ['sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean', 'carousel', 'terminal', 'polaroid'];
 
 	/** Wires an image URL field + Media Library picker + preview <img> + clear button, reused for the logo and the hero image. */
 	function initImagePicker(opts) {
@@ -333,6 +333,10 @@
 			}
 			if (heroFields) {
 				heroFields.style.opacity = isSplit ? '' : '.4';
+			}
+			var galleryRow = document.getElementById('is-carousel-gallery-row');
+			if (galleryRow) {
+				galleryRow.style.display = 'carousel' === template ? '' : 'none';
 			}
 		}
 

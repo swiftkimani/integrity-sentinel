@@ -1,4 +1,10 @@
 <?php
+/**
+ * Admin-curated known-bad SHA-256 file-hash signature matching.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -23,6 +29,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Signatures {
 
+	/**
+	 * Default settings: signature matching enabled, with an empty
+	 * admin-curated known-bad hash list.
+	 */
 	public static function default_settings() {
 		return array(
 			'enabled' => 1,
@@ -30,6 +40,9 @@ class IS_Signatures {
 		);
 	}
 
+	/**
+	 * Returns the stored `is_signatures_settings` option merged over the defaults.
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_signatures_settings', array() ), self::default_settings() );
 	}
@@ -43,6 +56,7 @@ class IS_Signatures {
 	 * into a hash => label map. Malformed lines (not a 64-char hex sha256)
 	 * are skipped rather than guessed at.
 	 *
+	 * @param string $text Raw textarea contents: one "sha256  # optional label" entry per line.
 	 * @return array<string,string>
 	 */
 	public static function parse_hash_list( $text ) {
@@ -67,7 +81,8 @@ class IS_Signatures {
 	 * hashes? Returns the match's label ('' if none was given), or null
 	 * for no match.
 	 *
-	 * @param array<string,string> $known_hashes
+	 * @param string               $content_sha256 The scanned content's SHA-256 hash (any case).
+	 * @param array<string,string> $known_hashes   Map of lowercase sha256 => label, as returned by parse_hash_list().
 	 */
 	public static function match_hash( $content_sha256, array $known_hashes ) {
 		$content_sha256 = strtolower( (string) $content_sha256 );
@@ -83,6 +98,7 @@ class IS_Signatures {
 	 * IS_Scanner::scan_one_file() can record findings from both
 	 * identically.
 	 *
+	 * @param string $content Raw file content to hash and check against the known-bad hash list.
 	 * @return array<array{rule_id:string,label:string,severity:string,matches:array}>
 	 */
 	public static function scan_content( $content ) {

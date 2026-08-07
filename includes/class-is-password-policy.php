@@ -1,4 +1,11 @@
 <?php
+/**
+ * Enforces a minimum password strength server-side, on both of WordPress
+ * core's password-set hooks.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -27,6 +34,11 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Password_Policy {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var self|null
+	 */
 	private static $instance = null;
 
 	/**
@@ -59,6 +71,9 @@ class IS_Password_Policy {
 		'changeme1',
 	);
 
+	/**
+	 * Returns the singleton instance, creating and hooking it up on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -67,6 +82,9 @@ class IS_Password_Policy {
 		return self::$instance;
 	}
 
+	/**
+	 * Default settings, used to fill in anything missing from the stored option.
+	 */
 	public static function default_settings() {
 		return array(
 			'enabled'            => 0,
@@ -77,10 +95,16 @@ class IS_Password_Policy {
 		);
 	}
 
+	/**
+	 * Stored settings, merged over default_settings().
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_password_policy_settings', array() ), self::default_settings() );
 	}
 
+	/**
+	 * Registers the WordPress hooks that enforce this policy.
+	 */
 	private function hooks() {
 		add_action( 'validate_password_reset', array( $this, 'check_password_reset' ), 10, 2 );
 		add_action( 'user_profile_update_errors', array( $this, 'check_profile_update' ), 10, 3 );
@@ -93,6 +117,9 @@ class IS_Password_Policy {
 	/**
 	 * Pure: every rule violation for $password given $settings, as
 	 * ready-to-display messages. Empty array = passes every enabled rule.
+	 *
+	 * @param string $password The candidate password to check.
+	 * @param array  $settings Settings shaped like default_settings().
 	 */
 	public static function password_issues( $password, array $settings ) {
 		$password = (string) $password;
@@ -130,6 +157,14 @@ class IS_Password_Policy {
 	// WordPress glue
 	// ===================================================================
 
+	/**
+	 * Hooked to `validate_password_reset`: adds a WP_Error for every rule
+	 * violation in the submitted reset-form password.
+	 *
+	 * @param WP_Error $errors Error collector to append to.
+	 * @param WP_User  $user   User the reset is for (unused; the raw password
+	 *                         only lives in $_POST at this hook).
+	 */
 	public function check_password_reset( $errors, $user ) {
 		IS_Guard::run(
 			'password_policy',
@@ -148,6 +183,16 @@ class IS_Password_Policy {
 		);
 	}
 
+	/**
+	 * Hooked to `user_profile_update_errors`: adds a WP_Error for every
+	 * rule violation when a password is being set on an existing user
+	 * (self-service change or an admin setting/creating one).
+	 *
+	 * @param WP_Error $errors Error collector to append to.
+	 * @param bool     $update Whether this is an existing-user update (unused).
+	 * @param WP_User  $user   User object; at this hook $user->user_pass holds
+	 *                         the raw, not-yet-hashed submitted password.
+	 */
 	public function check_profile_update( $errors, $update, $user ) {
 		IS_Guard::run(
 			'password_policy',

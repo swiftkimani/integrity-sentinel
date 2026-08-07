@@ -1,4 +1,11 @@
 <?php
+/**
+ * Verifies installed WordPress.org plugin files against WordPress.org's
+ * plugin checksum service.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -40,6 +47,10 @@ class IS_Plugin_Checksums {
 	const NOT_AVAILABLE = 'is_not_available';
 
 	/**
+	 * Fetches (and caches) the published checksums for a plugin version.
+	 *
+	 * @param string $slug    Plugin slug (directory name in wp-content/plugins).
+	 * @param string $version Plugin version to look up.
 	 * @return array|WP_Error Map of relative-path (within the plugin
 	 *                        folder) => array of acceptable md5/sha256
 	 *                        hashes, or WP_Error on failure.
@@ -93,6 +104,13 @@ class IS_Plugin_Checksums {
 		return $parsed;
 	}
 
+	/**
+	 * Builds the WP_Error returned when no checksums are published for a
+	 * plugin/version (either a real 404 or a non-WordPress.org plugin).
+	 *
+	 * @param string $slug    Plugin slug.
+	 * @param string $version Plugin version.
+	 */
 	private function not_found_error( $slug, $version ) {
 		return new WP_Error(
 			'is_plugin_checksums_not_found',
@@ -113,13 +131,15 @@ class IS_Plugin_Checksums {
 	 * changes like readme.txt across point releases). We normalize all
 	 * of that into path => [hash, hash, ...] so the comparison code only
 	 * has to deal with one shape.
+	 *
+	 * @param mixed $body Decoded JSON response body from the checksum endpoint.
 	 */
 	public function normalize_response( $body ) {
 		if ( ! is_array( $body ) ) {
 			return new WP_Error( 'is_plugin_checksums_bad_json', __( 'Checksum response was not valid JSON.', 'integrity-sentinel' ) );
 		}
 
-		$files = $body['files'] ?? $body; // fall back to flat shape
+		$files = $body['files'] ?? $body; // Fall back to flat shape.
 		if ( ! is_array( $files ) || empty( $files ) ) {
 			return new WP_Error( 'is_plugin_checksums_empty', __( 'Checksum response contained no file entries.', 'integrity-sentinel' ) );
 		}
@@ -129,7 +149,7 @@ class IS_Plugin_Checksums {
 			if ( is_string( $value ) ) {
 				$normalized[ $path ] = array( $value );
 			} elseif ( is_array( $value ) ) {
-				// Could be {"md5":"..","sha256":".."} or a plain list of hashes.
+				// The value can be a map of hash-algorithm name to hash, or a plain list of hashes.
 				$normalized[ $path ] = array_values(
 					array_filter(
 						$value,

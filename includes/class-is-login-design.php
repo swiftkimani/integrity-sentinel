@@ -1,4 +1,12 @@
 <?php
+/**
+ * Cosmetic customization layer for wp-login.php: built-in templates, an
+ * accent-color/logo/corner-radius/hero customizer, custom CSS, and an
+ * optional custom HTML banner.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -39,8 +47,16 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Login_Design {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var self|null
+	 */
 	private static $instance = null;
 
+	/**
+	 * Returns the singleton instance, creating and hooking it up on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -49,6 +65,9 @@ class IS_Login_Design {
 		return self::$instance;
 	}
 
+	/**
+	 * Registers the WordPress hooks that render and customize the login page.
+	 */
 	private function hooks() {
 		add_action( 'login_enqueue_scripts', array( $this, 'enqueue' ) );
 		add_filter( 'login_headerurl', array( $this, 'header_url' ) );
@@ -61,6 +80,9 @@ class IS_Login_Design {
 	// Settings
 	// ===================================================================
 
+	/**
+	 * The full set of built-in login-page templates, keyed by slug.
+	 */
 	public static function templates() {
 		return array(
 			'minimal'      => __( 'Minimal', 'integrity-sentinel' ),
@@ -76,11 +98,18 @@ class IS_Login_Design {
 		);
 	}
 
-	/** Pure: which templates use the split-screen hero-panel layout (everything but the plain card). */
+	/**
+	 * Pure: which templates use the split-screen hero-panel layout (everything but the plain card).
+	 *
+	 * @param string $template Template slug.
+	 */
 	public static function is_split_template( $template ) {
 		return in_array( $template, array( 'sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean', 'carousel', 'terminal', 'polaroid' ), true );
 	}
 
+	/**
+	 * Default settings, used to fill in anything missing from the stored option.
+	 */
 	public static function default_settings() {
 		return array(
 			'template'           => 'sunrise',
@@ -120,18 +149,31 @@ class IS_Login_Design {
 		);
 	}
 
-	/** Pure: validated carousel indicator style, defaulting to 'bars'. */
+	/**
+	 * Pure: validated carousel indicator style, defaulting to 'bars'.
+	 *
+	 * @param array $settings Settings array (shaped like default_settings()).
+	 */
 	public static function carousel_indicator( array $settings ) {
 		$value = isset( $settings['carousel_indicator'] ) ? (string) $settings['carousel_indicator'] : 'bars';
 		return array_key_exists( $value, self::carousel_indicators() ) ? $value : 'bars';
 	}
 
-	/** Pure: validated hero placement, defaulting to 'left'. */
+	/**
+	 * Pure: validated hero placement, defaulting to 'left'.
+	 *
+	 * @param array $settings Settings array (shaped like default_settings()).
+	 */
 	public static function hero_position( array $settings ) {
 		$value = isset( $settings['hero_position'] ) ? (string) $settings['hero_position'] : 'left';
 		return in_array( $value, self::hero_positions(), true ) ? $value : 'left';
 	}
 
+	/**
+	 * Stored settings, merged over default_settings() -- or, when the
+	 * current request qualifies (see preview_override()), an admin's
+	 * unsaved live preview draft.
+	 */
 	public static function settings() {
 		$preview = self::preview_override();
 		if ( null !== $preview ) {
@@ -159,6 +201,11 @@ class IS_Login_Design {
 		return is_array( $draft ) ? wp_parse_args( $draft, self::default_settings() ) : null;
 	}
 
+	/**
+	 * Transient key a given admin's live preview draft is stored under.
+	 *
+	 * @param int $user_id Admin user ID.
+	 */
 	private static function preview_transient_key( $user_id ) {
 		return 'is_login_design_preview_' . (int) $user_id;
 	}
@@ -167,6 +214,8 @@ class IS_Login_Design {
 	 * Stores a draft for THIS admin only, for a few minutes -- called from
 	 * the ajax handler with an already-sanitized array (see the class
 	 * docblock). Never touches the real saved option.
+	 *
+	 * @param array $draft Sanitized draft settings array.
 	 */
 	public static function store_preview( array $draft ) {
 		set_transient( self::preview_transient_key( get_current_user_id() ), $draft, 5 * MINUTE_IN_SECONDS );
@@ -176,27 +225,47 @@ class IS_Login_Design {
 	// Pure CSS/HTML assembly
 	// ===================================================================
 
-	/** Pure: neutralizes a </style breakout sequence before raw CSS is echoed inside a <style> tag. */
+	/**
+	 * Pure: neutralizes a </style breakout sequence before raw CSS is echoed inside a <style> tag.
+	 *
+	 * @param mixed $css Raw CSS to sanitize.
+	 */
 	public static function sanitize_css_for_style_tag( $css ) {
 		return str_ireplace( '</style', '<\\/style', (string) $css );
 	}
 
-	/** Pure: is this a plausible #rgb/#rrggbb/#rrggbbaa hex color? */
+	/**
+	 * Pure: is this a plausible #rgb/#rrggbb/#rrggbbaa hex color?
+	 *
+	 * @param mixed $value Value to test.
+	 */
 	public static function is_hex_color( $value ) {
 		return (bool) preg_match( '/^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i', (string) $value );
 	}
 
-	/** Pure: clamps a border-radius setting to a sane, renderable range. */
+	/**
+	 * Pure: clamps a border-radius setting to a sane, renderable range.
+	 *
+	 * @param mixed $radius Border-radius setting to clamp.
+	 */
 	public static function clamp_radius( $radius ) {
 		return max( 0, min( 40, (int) $radius ) );
 	}
 
-	/** Pure: is this a plausible http(s) image URL (the only scheme we'll ever emit into CSS/HTML)? */
+	/**
+	 * Pure: is this a plausible http(s) image URL (the only scheme we'll ever emit into CSS/HTML)?
+	 *
+	 * @param mixed $value Value to test.
+	 */
 	public static function is_http_url( $value ) {
 		return 0 === strpos( (string) $value, 'http://' ) || 0 === strpos( (string) $value, 'https://' );
 	}
 
-	/** Pure: strips characters that would let a URL escape a quoted CSS url("...") context. */
+	/**
+	 * Pure: strips characters that would let a URL escape a quoted CSS url("...") context.
+	 *
+	 * @param mixed $url URL to sanitize.
+	 */
 	private static function css_safe_url( $url ) {
 		return str_replace( array( '"', '\\' ), '', (string) $url );
 	}
@@ -205,6 +274,8 @@ class IS_Login_Design {
 	 * Pure: assembles the full login-page <style> contents for a given
 	 * settings array (shaped like default_settings()). Unknown/invalid
 	 * values fall back to sane defaults rather than producing broken CSS.
+	 *
+	 * @param array $settings Settings array (shaped like default_settings()).
 	 */
 	public static function build_css( array $settings ) {
 		$defaults = self::default_settings();
@@ -273,6 +344,8 @@ class IS_Login_Design {
 	 * header_text() while this setting is on) shows as a plain text
 	 * wordmark instead of the WordPress icon. When false, the stock
 	 * WordPress logo/branding is left alone.
+	 *
+	 * @param bool $hide_branding Whether to strip the default WordPress branding.
 	 */
 	private static function base_css( $hide_branding ) {
 		$css = '
@@ -295,6 +368,8 @@ class IS_Login_Design {
 	 * Pure: repositions the real #login card into one half of the
 	 * viewport (left or right), leaving the other half for
 	 * .is-login-hero -- see hero_position in default_settings().
+	 *
+	 * @param string $position Hero placement: 'left' or 'right'.
 	 */
 	private static function split_layout_css( $position ) {
 		$justify = 'right' === $position ? 'flex-start' : 'flex-end';
@@ -343,6 +418,8 @@ class IS_Login_Design {
 	 * legibility, and tucks the (now-behind-the-card) hero copy away. For
 	 * the Carousel template the slides stay live behind the card and the
 	 * nav controls drop to the bottom-center so they clear it.
+	 *
+	 * @param string $template Template slug.
 	 */
 	private static function center_hero_css( $template ) {
 		// WordPress prints the hero inside #login (via login_message), just
@@ -380,7 +457,11 @@ class IS_Login_Design {
 		';
 	}
 
-	/** Pure: the decorative hero-panel background for one split template. Colors tint from --is-login-color via color-mix(). */
+	/**
+	 * Pure: the decorative hero-panel background for one split template. Colors tint from --is-login-color via color-mix().
+	 *
+	 * @param string $template Template slug.
+	 */
 	private static function template_hero_css( $template ) {
 		$shared = '
 			.is-login-hero{position:fixed;top:0;bottom:0;width:50%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;padding:8vh 6vw;overflow:hidden;z-index:1;}
@@ -526,7 +607,11 @@ class IS_Login_Design {
 		}
 	}
 
-	/** Pure: form/card/input/button styling for one template. */
+	/**
+	 * Pure: form/card/input/button styling for one template.
+	 *
+	 * @param string $template Template slug.
+	 */
 	private static function template_form_css( $template ) {
 		if ( 'minimal' === $template ) {
 			return '
@@ -568,6 +653,8 @@ class IS_Login_Design {
 	 * time) is HTML-escaped here defensively before output. Purely
 	 * decorative, so the whole block is aria-hidden; the accessible page
 	 * title/heading/form remain untouched elsewhere on the page.
+	 *
+	 * @param array $settings Settings array (shaped like default_settings()).
 	 */
 	public static function build_hero_html( array $settings ) {
 		$defaults    = self::default_settings();
@@ -610,6 +697,8 @@ class IS_Login_Design {
 	 * slide -- see build_carousel_html()), else empty (falls back to the
 	 * same generated blob pattern every other split template uses
 	 * without an image).
+	 *
+	 * @param array $settings Settings array (shaped like default_settings()).
 	 */
 	public static function carousel_images( array $settings ) {
 		$gallery = isset( $settings['hero_gallery'] ) && is_array( $settings['hero_gallery'] ) ? $settings['hero_gallery'] : array();
@@ -628,6 +717,8 @@ class IS_Login_Design {
 	 * above a framed image gallery, with dot/arrow controls when there's
 	 * more than one image. The controls are inert without JS (the first
 	 * image just shows statically); carousel_js() wires them up.
+	 *
+	 * @param array $settings Settings array (shaped like default_settings()).
 	 */
 	private static function build_carousel_html( array $settings ) {
 		$heading    = trim( (string) $settings['hero_heading'] );
@@ -688,6 +779,9 @@ class IS_Login_Design {
 	 * treats them identically, toggling .is-active); the parent modifier
 	 * class (is-ind-*) is what makes them look different. 'numbers' emits a
 	 * live "current / total" counter, 'none' emits nothing (arrows only).
+	 *
+	 * @param string $indicator Indicator style key (see carousel_indicators()).
+	 * @param array  $images    Slide image URLs.
 	 */
 	private static function carousel_indicator_html( $indicator, array $images ) {
 		if ( 'none' === $indicator ) {
@@ -765,6 +859,11 @@ JS;
 	// WordPress glue
 	// ===================================================================
 
+	/**
+	 * Builds the settings-derived CSS (and, for a multi-image Carousel,
+	 * the carousel JS) and enqueues them as inline styles/scripts on the
+	 * login page.
+	 */
 	public function enqueue() {
 		IS_Guard::run(
 			'login_design',
@@ -786,7 +885,11 @@ JS;
 		);
 	}
 
-	/** When "Hide WordPress branding" is on (the default), points the logo link at the site's own homepage -- never wordpress.org. */
+	/**
+	 * When "Hide WordPress branding" is on (the default), points the logo link at the site's own homepage -- never wordpress.org.
+	 *
+	 * @param string $url Default login header URL.
+	 */
 	public function header_url( $url ) {
 		return IS_Guard::run(
 			'login_design',
@@ -797,7 +900,11 @@ JS;
 		);
 	}
 
-	/** When "Hide WordPress branding" is on (the default), uses the site name instead of WordPress core's default "Powered by WordPress". */
+	/**
+	 * When "Hide WordPress branding" is on (the default), uses the site name instead of WordPress core's default "Powered by WordPress".
+	 *
+	 * @param string $text Default login header text.
+	 */
 	public function header_text( $text ) {
 		return IS_Guard::run(
 			'login_design',
@@ -808,7 +915,11 @@ JS;
 		);
 	}
 
-	/** When "Hide WordPress branding" is on (the default), rebuilds the <title> tag from the site name so core's default "... — WordPress" suffix never appears. */
+	/**
+	 * When "Hide WordPress branding" is on (the default), rebuilds the <title> tag from the site name so core's default "... — WordPress" suffix never appears.
+	 *
+	 * @param string $title Default login page title.
+	 */
 	public function filter_login_title( $title ) {
 		return IS_Guard::run(
 			'login_design',
@@ -827,6 +938,8 @@ JS;
 	 * admin's custom HTML banner to login_message's output. Both stored
 	 * values are already sanitized at save time -- see the class
 	 * docblock.
+	 *
+	 * @param string $message Default login_message output.
 	 */
 	public function inject_custom_html( $message ) {
 		return IS_Guard::run(

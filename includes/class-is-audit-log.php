@@ -1,4 +1,10 @@
 <?php
+/**
+ * Append-only audit trail for Integrity Sentinel.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -15,6 +21,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 class IS_Audit_Log {
 
 	/**
+	 * Records one audit-log row.
+	 *
 	 * @param string $action Short machine-readable action slug.
 	 * @param array  $detail Context stored as JSON (keep it small).
 	 */
@@ -50,6 +58,12 @@ class IS_Audit_Log {
 		return $ip ? $ip : '';
 	}
 
+	/**
+	 * Most recent audit-log rows, newest first.
+	 *
+	 * @param int $limit  Maximum rows to return.
+	 * @param int $offset Rows to skip, for pagination.
+	 */
 	public static function entries( $limit = 50, $offset = 0 ) {
 		global $wpdb;
 		$table = IS_DB::instance()->audit_table();
@@ -63,7 +77,12 @@ class IS_Audit_Log {
 		);
 	}
 
-	/** Same as entries(), filtered to one exact action slug -- used for small "recent triggers" lists (e.g. deception detections). */
+	/**
+	 * Same as entries(), filtered to one exact action slug -- used for small "recent triggers" lists (e.g. deception detections).
+	 *
+	 * @param string $action Exact action slug to filter on.
+	 * @param int    $limit  Maximum rows to return.
+	 */
 	public static function entries_for_action( $action, $limit = 20 ) {
 		global $wpdb;
 		$table = IS_DB::instance()->audit_table();
@@ -77,6 +96,9 @@ class IS_Audit_Log {
 		);
 	}
 
+	/**
+	 * Total number of audit-log rows.
+	 */
 	public static function count() {
 		global $wpdb;
 		$table = IS_DB::instance()->audit_table();

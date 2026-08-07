@@ -1,4 +1,10 @@
 <?php
+/**
+ * Surfaces staleness of WordPress core's own Application Passwords.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -14,10 +20,16 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Api_Key_Hygiene {
 
+	/**
+	 * Default settings, used to fill in anything missing from the stored option.
+	 */
 	public static function default_settings() {
 		return array( 'stale_after_days' => 90 );
 	}
 
+	/**
+	 * Returns the stored settings merged over the defaults.
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_api_key_hygiene_settings', array() ), self::default_settings() );
 	}
@@ -32,13 +44,15 @@ class IS_Api_Key_Hygiene {
 	 * creation time (a password created long ago and never once used is
 	 * exactly as much of a dangling credential as one that went idle).
 	 *
-	 * @param array{created?:int,last_used?:int} $app_password
+	 * @param array{created?:int,last_used?:int} $app_password    Application password record.
+	 * @param int                                $now              Current timestamp.
+	 * @param int                                $stale_after_days Days of inactivity before a password is stale.
 	 */
 	public static function is_stale( array $app_password, $now, $stale_after_days ) {
 		$last_used = isset( $app_password['last_used'] ) ? (int) $app_password['last_used'] : 0;
 		$reference = $last_used > 0 ? $last_used : ( isset( $app_password['created'] ) ? (int) $app_password['created'] : 0 );
 		if ( 0 === $reference ) {
-			return false; // nothing to compare against
+			return false; // Nothing to compare against.
 		}
 		return ( $now - $reference ) > ( max( 1, (int) $stale_after_days ) * DAY_IN_SECONDS );
 	}
@@ -48,6 +62,8 @@ class IS_Api_Key_Hygiene {
 	// -----------------------------------------------------------------
 
 	/**
+	 * Lists every Application Password across every user, with staleness computed.
+	 *
 	 * @return array<array{user_id:int,user_login:string,name:string,uuid:string,created:int,last_used:int,last_ip:string,is_stale:bool}>
 	 */
 	public static function list_all() {

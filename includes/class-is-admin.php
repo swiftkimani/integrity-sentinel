@@ -1,12 +1,30 @@
 <?php
+/**
+ * Admin UI: settings pages, dashboard, and admin-post handlers for Integrity Sentinel.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * Registers the admin menu, settings, and page renderers, and handles the
+ * plugin's admin-post actions (quarantine, hardening, canary token, etc).
+ */
 class IS_Admin {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Admin|null
+	 */
 	private static $instance = null;
 
+	/**
+	 * Returns the singleton instance, creating it on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -15,6 +33,9 @@ class IS_Admin {
 		return self::$instance;
 	}
 
+	/**
+	 * Wires up the admin menu, settings, enqueue, and admin-post action hooks.
+	 */
 	private function hooks() {
 		add_action( 'admin_menu', array( $this, 'add_menu' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
@@ -39,6 +60,9 @@ class IS_Admin {
 		add_action( 'admin_post_is_export_compliance_report', array( $this, 'handle_export_compliance_report' ) );
 	}
 
+	/**
+	 * Registers the top-level admin menu page and its submenu pages.
+	 */
 	public function add_menu() {
 		add_menu_page(
 			__( 'Integrity Sentinel', 'integrity-sentinel' ),
@@ -170,6 +194,8 @@ class IS_Admin {
 	 * replacing reliance on WP's now-hidden submenu flyout) plus the
 	 * content pane every render_*() method's markup lives inside.
 	 * Always paired with render_shell_close().
+	 *
+	 * @param string $active_key Nav item key of the currently displayed page.
 	 */
 	private function render_shell_open( $active_key ) {
 		?>
@@ -199,6 +225,9 @@ class IS_Admin {
 		<?php
 	}
 
+	/**
+	 * Closes the app shell markup opened by render_shell_open().
+	 */
 	private function render_shell_close() {
 		?>
 			</main>
@@ -206,6 +235,12 @@ class IS_Admin {
 		<?php
 	}
 
+	/**
+	 * Enqueues the admin CSS/JS (and the media library, on the Login Design
+	 * page) for this plugin's own admin screens.
+	 *
+	 * @param string $hook Current admin page hook suffix.
+	 */
 	public function enqueue( $hook ) {
 		if ( strpos( $hook, 'integrity-sentinel' ) === false ) {
 			return;
@@ -227,12 +262,16 @@ class IS_Admin {
 					'scanComplete'   => __( 'Scan complete.', 'integrity-sentinel' ),
 					'scanError'      => __( 'Scan error:', 'integrity-sentinel' ),
 					'scanInProgress' => __( 'A scan is already in progress — showing its status.', 'integrity-sentinel' ),
+					/* translators: %d: number of plugins that could not be checksum-verified */
 					'notCheckable'   => __( '%d plugin(s) could not be checksum-verified (not hosted on WordPress.org).', 'integrity-sentinel' ),
 				),
 			)
 		);
 	}
 
+	/**
+	 * Registers all Settings API groups/options and their sanitize callbacks.
+	 */
 	public function register_settings() {
 		register_setting(
 			'is_settings_group',
@@ -388,6 +427,11 @@ class IS_Admin {
 		);
 	}
 
+	/**
+	 * Sanitizes the vulnerability scanner settings (WPScan API key and enabled flag).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_vulnerability_scanner_settings( $input ) {
 		$old     = IS_Vulnerability_Scanner::settings();
 		$api_key = isset( $input['api_key'] ) ? sanitize_text_field( trim( (string) $input['api_key'] ) ) : '';
@@ -415,6 +459,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the known-malware-signature settings (enabled flag and hash list).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_signatures_settings( $input ) {
 		$old = IS_Signatures::settings();
 		$out = array(
@@ -435,6 +484,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the threat intelligence settings (AbuseIPDB/VirusTotal keys and enabled flag).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_threat_intel_settings( $input ) {
 		$old = IS_Threat_Intel::settings();
 		$out = array(
@@ -451,12 +505,17 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the deception (canary/honeypot) settings, preserving the canary token as read-only.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_deception_settings( $input ) {
 		$old = IS_Deception::settings();
 		$out = array(
 			'enabled'      => empty( $input['enabled'] ) ? 0 : 1,
 			'ban_minutes'  => max( 1, min( 10080, (int) ( $input['ban_minutes'] ?? 60 ) ) ),
-			'canary_token' => $old['canary_token'], // never editable from this form -- only via the dedicated regenerate action
+			'canary_token' => $old['canary_token'], // never editable from this form -- only via the dedicated regenerate action.
 		);
 
 		if ( $out['enabled'] !== $old['enabled'] || $out['ban_minutes'] !== $old['ban_minutes'] ) {
@@ -472,6 +531,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the password policy settings (minimum length and character requirements).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_password_policy_settings( $input ) {
 		$old = IS_Password_Policy::settings();
 		$out = array(
@@ -489,6 +553,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the session security settings (new-IP alerting and impossible-travel detection).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_session_settings( $input ) {
 		$old = IS_Sessions::settings();
 		$out = array(
@@ -510,6 +579,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the API key hygiene settings (staleness threshold in days).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_api_key_hygiene_settings( $input ) {
 		$old = IS_Api_Key_Hygiene::settings();
 		$out = array( 'stale_after_days' => max( 1, min( 3650, (int) ( $input['stale_after_days'] ?? 90 ) ) ) );
@@ -521,6 +595,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the asset cloak settings (URL alias and enabled flag), validating the alias.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_asset_cloak_settings( $input ) {
 		$old     = IS_Asset_Cloak::settings();
 		$raw     = isset( $input['alias'] ) ? $input['alias'] : '';
@@ -563,6 +642,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the two-factor authentication settings (which roles have 2FA enforced).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_2fa_settings( $input ) {
 		$old         = IS_2FA::settings();
 		$valid_roles = array_keys( wp_roles()->get_names() );
@@ -576,6 +660,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the REST API hardening settings (enumeration protection, rate limiting, allowed routes).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_rest_api_settings( $input ) {
 		$old = IS_Rest_API::settings();
 		$out = array(
@@ -601,6 +690,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the REST posts endpoint settings (enabled flag and rate limit).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_rest_posts_settings( $input ) {
 		$old = IS_Rest_Posts::settings();
 		$out = array(
@@ -621,6 +715,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the hotlink protection settings (allowed referrer domains).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_hotlink_settings( $input ) {
 		$old = IS_Hotlink::settings();
 		$out = array( 'allowed_domains' => sanitize_textarea_field( $input['allowed_domains'] ?? '' ) );
@@ -635,6 +734,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the bot blocking settings (enabled flag and blocked bot list).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_bot_block_settings( $input ) {
 		$old = IS_Bot_Block::settings();
 		$out = array(
@@ -655,6 +759,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the login rename settings (custom login slug and admin subdomain host).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_login_rename_settings( $input ) {
 		$old  = IS_Login::rename_settings();
 		$raw  = isset( $input['login_slug'] ) ? $input['login_slug'] : '';
@@ -724,6 +833,9 @@ class IS_Admin {
 	 * an identically-validated draft for the unsaved-changes preview
 	 * without either of those side effects firing for something that was
 	 * never actually saved.
+	 *
+	 * @param array $input Raw settings submitted from the form (or preview draft).
+	 * @param array $old   The currently saved login design settings.
 	 */
 	public function sanitize_login_design_input( $input, $old ) {
 		$defaults = IS_Login_Design::default_settings();
@@ -795,6 +907,12 @@ class IS_Admin {
 		);
 	}
 
+	/**
+	 * Sanitizes the login design settings via sanitize_login_design_input(), then
+	 * records the change and surfaces a settings error for an invalid accent color.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_login_design_settings( $input ) {
 		$old = IS_Login_Design::settings();
 		$out = $this->sanitize_login_design_input( $input, $old );
@@ -815,6 +933,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the login throttle settings (attempt limits, lockout, credential-stuffing threshold).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_login_throttle_settings( $input ) {
 		$old = IS_Login::throttle_settings();
 		$out = array(
@@ -838,6 +961,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the IP allow/deny list settings, including trusted proxy ranges and header.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_ip_list_settings( $input ) {
 		$old = IS_IP_List::settings();
 
@@ -870,6 +998,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the security header hardening settings, including the raw CSP header value.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_hardening_settings( $input ) {
 		$old = IS_Headers::settings();
 		$out = array();
@@ -900,6 +1033,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the main scan settings, and emails the previous alert address if it changed.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_settings( $input ) {
 		$old = get_option( 'is_scan_settings', array() );
 
@@ -957,16 +1095,20 @@ class IS_Admin {
 		return $out;
 	}
 
-	// -----------------------------------------------------------------
-	// Hardening actions (plain admin-post forms, no JS dependency)
-	// -----------------------------------------------------------------
-
+	/**
+	 * Hardening actions (plain admin-post forms, no JS dependency).
+	 *
+	 * Applies the uploads-directory execution block.
+	 */
 	public function handle_apply_uploads_block() {
 		$this->guard_hardening_action();
 		$result = IS_Hardening::apply_uploads_block();
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Applies the asset cloak .htaccess rewrite rule using the saved alias.
+	 */
 	public function handle_apply_asset_cloak() {
 		$this->guard_hardening_action();
 		$alias = IS_Asset_Cloak::settings()['alias'];
@@ -977,18 +1119,27 @@ class IS_Admin {
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Removes the asset cloak .htaccess rewrite rule.
+	 */
 	public function handle_remove_asset_cloak() {
 		$this->guard_hardening_action();
 		$result = IS_Asset_Cloak::remove_block();
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Removes the uploads-directory execution block.
+	 */
 	public function handle_remove_uploads_block() {
 		$this->guard_hardening_action();
 		$result = IS_Hardening::remove_uploads_block();
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Applies the execution block for the POSTed target directory key.
+	 */
 	public function handle_apply_exec_block() {
 		$this->guard_hardening_action();
 		$target = $this->resolve_exec_block_target();
@@ -996,6 +1147,9 @@ class IS_Admin {
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Removes the execution block for the POSTed target directory key.
+	 */
 	public function handle_remove_exec_block() {
 		$this->guard_hardening_action();
 		$target = $this->resolve_exec_block_target();
@@ -1015,18 +1169,27 @@ class IS_Admin {
 		return isset( $targets[ $key ] ) ? $targets[ $key ] : null;
 	}
 
+	/**
+	 * Applies the hotlink protection .htaccess rewrite rule.
+	 */
 	public function handle_apply_hotlink_block() {
 		$this->guard_hardening_action();
 		$result = IS_Hotlink::apply();
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Removes the hotlink protection .htaccess rewrite rule.
+	 */
 	public function handle_remove_hotlink_block() {
 		$this->guard_hardening_action();
 		$result = IS_Hotlink::remove();
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Resets a paused module's health/failure state so it resumes running.
+	 */
 	public function handle_reset_module_health() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -1043,6 +1206,9 @@ class IS_Admin {
 		exit;
 	}
 
+	/**
+	 * Verifies capability and nonce for a quarantine admin-post action, dying if either fails.
+	 */
 	private function guard_quarantine_action() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -1050,6 +1216,9 @@ class IS_Admin {
 		check_admin_referer( 'is_quarantine_action' );
 	}
 
+	/**
+	 * Moves the POSTed finding into quarantine.
+	 */
 	public function handle_quarantine_finding() {
 		$this->guard_quarantine_action();
 
@@ -1072,6 +1241,9 @@ class IS_Admin {
 		exit;
 	}
 
+	/**
+	 * Restores the POSTed quarantined file to its original location.
+	 */
 	public function handle_quarantine_restore() {
 		$this->guard_quarantine_action();
 		$id     = isset( $_POST['quarantine_id'] ) ? (int) $_POST['quarantine_id'] : 0;
@@ -1079,6 +1251,9 @@ class IS_Admin {
 		$this->redirect_quarantine( $result );
 	}
 
+	/**
+	 * Permanently deletes the POSTed quarantined file, requiring an explicit confirmation checkbox.
+	 */
 	public function handle_quarantine_delete() {
 		$this->guard_quarantine_action();
 
@@ -1091,6 +1266,11 @@ class IS_Admin {
 		$this->redirect_quarantine( $result );
 	}
 
+	/**
+	 * Redirects back to the Quarantine page, appending an error message if the action failed.
+	 *
+	 * @param mixed $result Result of the quarantine action; a WP_Error on failure.
+	 */
 	private function redirect_quarantine( $result ) {
 		$url = admin_url( 'admin.php?page=integrity-sentinel-quarantine' );
 		if ( is_wp_error( $result ) ) {
@@ -1100,6 +1280,9 @@ class IS_Admin {
 		exit;
 	}
 
+	/**
+	 * Verifies capability and nonce for a hardening admin-post action, dying if either fails.
+	 */
 	private function guard_hardening_action() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -1107,6 +1290,11 @@ class IS_Admin {
 		check_admin_referer( 'is_hardening_action' );
 	}
 
+	/**
+	 * Redirects back to the Hardening page, appending an error message if one was given.
+	 *
+	 * @param string $error_message Optional error message to append as a query arg.
+	 */
 	private function redirect_hardening( $error_message = '' ) {
 		$url = add_query_arg( array( 'page' => 'integrity-sentinel-hardening' ), admin_url( 'admin.php' ) );
 		if ( $error_message ) {
@@ -1116,10 +1304,11 @@ class IS_Admin {
 		exit;
 	}
 
-	// -----------------------------------------------------------------
-	// Threat intelligence: on-demand reputation checks + SBOM download
-	// -----------------------------------------------------------------
-
+	/**
+	 * Threat intelligence: on-demand reputation checks + SBOM download.
+	 *
+	 * Verifies capability and nonce for a threat-intel admin-post action, dying if either fails.
+	 */
 	private function guard_threat_intel_action() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -1162,6 +1351,9 @@ class IS_Admin {
 		exit;
 	}
 
+	/**
+	 * Looks up the POSTed finding's file hash against VirusTotal and redirects back with a result summary.
+	 */
 	public function handle_check_hash_reputation() {
 		$this->guard_threat_intel_action();
 		$finding_id = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0;
@@ -1204,6 +1396,9 @@ class IS_Admin {
 		exit;
 	}
 
+	/**
+	 * Regenerates the deception module's canary token.
+	 */
 	public function handle_regenerate_canary_token() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -1217,10 +1412,11 @@ class IS_Admin {
 		exit;
 	}
 
-	// -----------------------------------------------------------------
-	// Dashboard
-	// -----------------------------------------------------------------
-
+	/**
+	 * Dashboard.
+	 *
+	 * Renders the dashboard page: severity counts, the latest scan run, and any run in progress.
+	 */
 	public function render_dashboard() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -1428,6 +1624,9 @@ class IS_Admin {
 		);
 	}
 
+	/**
+	 * Renders the dashboard's security status grid (REST, quarantine, etc. at-a-glance items).
+	 */
 	private function render_security_status() {
 		?>
 		<h2><?php esc_html_e( 'Security status', 'integrity-sentinel' ); ?></h2>
@@ -1512,10 +1711,11 @@ class IS_Admin {
 		<?php
 	}
 
-	// -----------------------------------------------------------------
-	// Findings
-	// -----------------------------------------------------------------
-
+	/**
+	 * Findings.
+	 *
+	 * Renders the Findings page: a filterable, paginated list of scan findings.
+	 */
 	public function render_findings() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -1804,10 +2004,11 @@ class IS_Admin {
 		$this->render_shell_close();
 	}
 
-	// -----------------------------------------------------------------
-	// Hardening
-	// -----------------------------------------------------------------
-
+	/**
+	 * Hardening.
+	 *
+	 * Renders the Hardening page: uploads/exec blocks, hotlink protection, asset cloak, headers.
+	 */
 	public function render_hardening() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -1882,7 +2083,7 @@ class IS_Admin {
 	 */
 	private function render_other_exec_block_targets() {
 		$targets = IS_Hardening::exec_block_targets();
-		unset( $targets['uploads'] ); // covered by its own dedicated section above
+		unset( $targets['uploads'] ); // covered by its own dedicated section above.
 		if ( empty( $targets ) ) {
 			return;
 		}
@@ -2169,8 +2370,8 @@ class IS_Admin {
 		<p class="description">
 			<?php
 			printf(
-				/* translators: %s: link to wpscan.com/register */
 				wp_kses(
+					/* translators: %s: link to wpscan.com/register */
 					__( 'Requires a free WPScan API key (25 requests/day) — <a href="%s" target="_blank" rel="noopener noreferrer">register at wpscan.com</a>. Off by default since, unlike the WordPress.org lookups elsewhere in this plugin, it depends on a key only you can provide.', 'integrity-sentinel' ),
 					array(
 						'a' => array(
@@ -2276,8 +2477,8 @@ class IS_Admin {
 						<p class="description">
 							<?php
 							printf(
-								/* translators: %s: link to abuseipdb.com/register */
 								wp_kses(
+									/* translators: %s: link to abuseipdb.com/register */
 									__( 'Free tier available — <a href="%s" target="_blank" rel="noopener noreferrer">register at abuseipdb.com</a>.', 'integrity-sentinel' ),
 									array(
 										'a' => array(
@@ -2300,8 +2501,8 @@ class IS_Admin {
 						<p class="description">
 							<?php
 							printf(
-								/* translators: %s: link to virustotal.com/gui/join-us */
 								wp_kses(
+									/* translators: %s: link to virustotal.com/gui/join-us */
 									__( 'Free tier available — <a href="%s" target="_blank" rel="noopener noreferrer">register at virustotal.com</a>.', 'integrity-sentinel' ),
 									array(
 										'a' => array(
@@ -2331,10 +2532,11 @@ class IS_Admin {
 		<?php
 	}
 
-	// -----------------------------------------------------------------
-	// Access control (IP allow/deny lists)
-	// -----------------------------------------------------------------
-
+	/**
+	 * Access control (IP allow/deny lists).
+	 *
+	 * Renders the Access Control page: IP whitelist/blacklist, trusted proxy settings, and bot blocking.
+	 */
 	public function render_access_control() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -2483,6 +2685,11 @@ class IS_Admin {
 		<?php
 	}
 
+	/**
+	 * Renders a table of recent audit log entries for the given deception action.
+	 *
+	 * @param string $action Audit log action name to filter entries by.
+	 */
 	private function render_deception_entries( $action ) {
 		$entries = IS_Audit_Log::entries_for_action( $action, 10 );
 		if ( empty( $entries ) ) {
@@ -2511,10 +2718,11 @@ class IS_Admin {
 		<?php
 	}
 
-	// -----------------------------------------------------------------
-	// Login security (rename + rate limiting)
-	// -----------------------------------------------------------------
-
+	/**
+	 * Login security (rename + rate limiting).
+	 *
+	 * Renders the Login Security page: login rename, throttle, 2FA, and password policy settings.
+	 */
 	public function render_login_security() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -2656,8 +2864,8 @@ class IS_Admin {
 			<p class="description">
 				<?php
 				printf(
-					/* translators: %s: URL to the user's own profile page */
 					wp_kses(
+						/* translators: %s: URL to the user's own profile page */
 						__( 'Every user sets up their own two-factor authentication from <a href="%s">their profile page</a> — it cannot be set up on someone else\'s behalf. The setting below only controls whether it\'s required.', 'integrity-sentinel' ),
 						array( 'a' => array( 'href' => array() ) )
 					),
@@ -2787,7 +2995,11 @@ class IS_Admin {
 		<?php
 	}
 
-	/** Renders the active-sessions table for one user (used on the Login Security page for the current admin). */
+	/**
+	 * Renders the active-sessions table for one user (used on the Login Security page for the current admin).
+	 *
+	 * @param int $user_id User ID whose active sessions should be listed.
+	 */
 	private function render_sessions_table( $user_id ) {
 		$sessions = IS_Sessions::sessions_for( $user_id );
 		if ( ! $sessions ) {
@@ -2834,10 +3046,11 @@ class IS_Admin {
 		<?php
 	}
 
-	// -----------------------------------------------------------------
-	// Login Design
-	// -----------------------------------------------------------------
-
+	/**
+	 * Login Design.
+	 *
+	 * Renders the Login Design page: template picker, live preview, and customization form.
+	 */
 	public function render_login_design() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -3014,10 +3227,11 @@ class IS_Admin {
 		$this->render_shell_close();
 	}
 
-	// -----------------------------------------------------------------
-	// REST API
-	// -----------------------------------------------------------------
-
+	/**
+	 * REST API.
+	 *
+	 * Renders the REST API page: enumeration/rate-limit restrictions and the blog post publishing endpoint.
+	 */
 	public function render_rest_api() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -3129,10 +3343,11 @@ class IS_Admin {
 		$this->render_shell_close();
 	}
 
-	// -----------------------------------------------------------------
-	// Audit log
-	// -----------------------------------------------------------------
-
+	/**
+	 * Audit log.
+	 *
+	 * Renders the Audit Log page: a paginated list of recorded security-relevant events.
+	 */
 	public function render_audit_log() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -3316,11 +3531,14 @@ class IS_Admin {
 			),
 			array(
 				'label'  => __( 'Append-only audit logging active', 'integrity-sentinel' ),
-				'passed' => true, // always-on core feature of this plugin
+				'passed' => true, // always-on core feature of this plugin.
 			),
 		);
 	}
 
+	/**
+	 * Renders the Reports & Compliance page: security headers score, email auth check, and compliance checklist.
+	 */
 	public function render_reports() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -3390,6 +3608,9 @@ class IS_Admin {
 		$this->render_shell_close();
 	}
 
+	/**
+	 * Streams the compliance report (headers score, email auth, checklist) as a Markdown download.
+	 */
 	public function handle_export_compliance_report() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -3426,10 +3647,11 @@ class IS_Admin {
 		exit;
 	}
 
-	// -----------------------------------------------------------------
-	// Settings
-	// -----------------------------------------------------------------
-
+	/**
+	 * Settings.
+	 *
+	 * Renders the Settings page: scan schedule, alerting, and general scan configuration.
+	 */
 	public function render_settings() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;

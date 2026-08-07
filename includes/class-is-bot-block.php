@@ -1,4 +1,10 @@
 <?php
+/**
+ * Blocks a curated, admin-editable list of AI-crawler/scraper user agents.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -13,8 +19,16 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Bot_Block {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var self|null
+	 */
 	private static $instance = null;
 
+	/**
+	 * Returns the singleton instance, creating and hooking it up on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -23,6 +37,10 @@ class IS_Bot_Block {
 		return self::$instance;
 	}
 
+	/**
+	 * The built-in list of AI-crawler/scraper user-agent substrings blocked
+	 * by default.
+	 */
 	public static function default_bot_list() {
 		return array(
 			'GPTBot',
@@ -45,6 +63,9 @@ class IS_Bot_Block {
 		);
 	}
 
+	/**
+	 * Default settings, used to fill in anything missing from the stored option.
+	 */
 	public static function default_settings() {
 		return array(
 			'enabled'      => 1,
@@ -52,10 +73,16 @@ class IS_Bot_Block {
 		);
 	}
 
+	/**
+	 * Stored settings, merged over default_settings().
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_bot_block_settings', array() ), self::default_settings() );
 	}
 
+	/**
+	 * Registers the WordPress hooks that enforce the block and extend robots.txt.
+	 */
 	private function hooks() {
 		// 'init', not 'plugins_loaded': this class is instantiated from
 		// is_init(), itself a 'plugins_loaded' callback -- a callback
@@ -71,6 +98,7 @@ class IS_Bot_Block {
 	 * Pure: parses a textarea's worth of user-agent substrings, one per
 	 * line, blank lines ignored.
 	 *
+	 * @param string $text Raw textarea value, one blocklist entry per line.
 	 * @return string[]
 	 */
 	public static function parse_bot_list( $text ) {
@@ -96,6 +124,10 @@ class IS_Bot_Block {
 		return false;
 	}
 
+	/**
+	 * 'init' callback: 403s the request if its User-Agent matches an
+	 * enabled, admin-configured blocklist entry.
+	 */
 	public function maybe_block() {
 		IS_Guard::run(
 			'bot_block',
@@ -113,6 +145,13 @@ class IS_Bot_Block {
 		);
 	}
 
+	/**
+	 * 'robots_txt' filter: appends a Disallow entry for each enabled
+	 * blocklist entry.
+	 *
+	 * @param string $output Existing robots.txt contents.
+	 * @return string
+	 */
 	public function filter_robots_txt( $output ) {
 		return IS_Guard::run(
 			'bot_block',

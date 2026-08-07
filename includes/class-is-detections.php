@@ -1,4 +1,10 @@
 <?php
+/**
+ * Structured detection registry for behavioral/abuse signals.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -76,6 +82,8 @@ class IS_Detections {
 	 * Pure: looks up a rule, falling back to a generic 'info' shape for
 	 * an unregistered rule_id rather than erroring -- a typo'd rule_id
 	 * should still get logged, just without a wrong severity guess.
+	 *
+	 * @param string $rule_id Key into rules().
 	 */
 	public static function rule( $rule_id ) {
 		$rules = self::rules();
@@ -89,7 +97,11 @@ class IS_Detections {
 		);
 	}
 
-	/** Pure: flattens a detail array into human-readable lines for email/webhook bodies. */
+	/**
+	 * Pure: flattens a detail array into human-readable lines for email/webhook bodies.
+	 *
+	 * @param array $detail Context to flatten.
+	 */
 	public static function format_detail_lines( array $detail ) {
 		$lines = array();
 		foreach ( $detail as $key => $value ) {

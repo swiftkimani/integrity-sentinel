@@ -10,6 +10,8 @@
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       integrity-sentinel
+ *
+ * @package Integrity_Sentinel
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -41,6 +43,12 @@ spl_autoload_register(
 	}
 );
 
+/**
+ * Boots every module on 'plugins_loaded': loads the text domain, then
+ * (main site only, on multisite) instantiates the DB, cron, and every
+ * detection/hardening class, plus the admin UI and AJAX handlers when
+ * in wp-admin.
+ */
 function is_init() {
 	load_plugin_textdomain( 'integrity-sentinel', false, dirname( plugin_basename( IS_PLUGIN_FILE ) ) . '/languages' );
 
@@ -101,13 +109,13 @@ function is_activate() {
 			array(
 				'batch_size'           => 40,
 				'alert_email'          => get_option( 'admin_email' ),
-				'alert_on_severity'    => 'high', // critical, high, medium, low
+				'alert_on_severity'    => 'high', // critical, high, medium, low.
 				'scan_uploads_for_php' => 1,
-				'max_file_size_kb'     => 2048, // skip pattern-scanning (not hashing) files bigger than this
+				'max_file_size_kb'     => 2048, // skip pattern-scanning (not hashing) files bigger than this.
 				'excluded_paths'       => "wp-content/cache\nwp-content/uploads/backup*\nwp-content/ai1wm-backups",
 				'webhook_url'          => '',
 				'deadman_days'         => 2,
-				'scan_frequency'       => 'daily', // hourly, twicedaily, daily, weekly
+				'scan_frequency'       => 'daily', // hourly, twicedaily, daily, weekly.
 			),
 			false
 		);

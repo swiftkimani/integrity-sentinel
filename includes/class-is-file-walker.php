@@ -1,4 +1,10 @@
 <?php
+/**
+ * Enumerates files under ABSPATH for the scanner to process.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -18,9 +24,18 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_File_Walker {
 
-	/** @var string[] */
+	/**
+	 * Shell-style glob patterns (relative to ABSPATH) to skip.
+	 *
+	 * @var string[]
+	 */
 	private $exclude_patterns;
 
+	/**
+	 * Constructor.
+	 *
+	 * @param string[] $exclude_patterns Shell-style glob patterns (relative to ABSPATH) to skip.
+	 */
 	public function __construct( array $exclude_patterns = array() ) {
 		$this->exclude_patterns = array_filter( array_map( 'trim', $exclude_patterns ) );
 	}
@@ -45,6 +60,8 @@ class IS_File_Walker {
 	 * or a single plugin directory). Paths are still returned relative to
 	 * ABSPATH so they slot straight into findings and exclusion checks.
 	 * Returns an empty array if the directory resolves outside ABSPATH.
+	 *
+	 * @param string $abs_dir Absolute path to the subtree to walk.
 	 */
 	public function list_files_under( $abs_dir ) {
 		$root = realpath( ABSPATH );
@@ -55,6 +72,14 @@ class IS_File_Walker {
 		return $this->collect( $dir, $root );
 	}
 
+	/**
+	 * Recursively walks $start_dir and returns ABSPATH-relative paths for
+	 * every regular, non-excluded file, skipping anything that resolves
+	 * (via symlink) outside of $root.
+	 *
+	 * @param string $start_dir Absolute path to start walking from.
+	 * @param string $root      Absolute path every resolved file must live under.
+	 */
 	private function collect( $start_dir, $root ) {
 		$paths = array();
 
@@ -62,11 +87,11 @@ class IS_File_Walker {
 			$iterator = new RecursiveIteratorIterator(
 				new RecursiveDirectoryIterator( $start_dir, FilesystemIterator::SKIP_DOTS ),
 				RecursiveIteratorIterator::SELF_FIRST,
-				RecursiveIteratorIterator::CATCH_GET_CHILD // unreadable subdirectory: skip it, don't abort the whole walk
+				RecursiveIteratorIterator::CATCH_GET_CHILD // unreadable subdirectory: skip it, don't abort the whole walk.
 			);
 
 			foreach ( $iterator as $file ) {
-				/** @var SplFileInfo $file */
+				/** Current directory entry. @var SplFileInfo $file */
 				if ( ! $file->isFile() ) {
 					continue;
 				}
@@ -85,7 +110,7 @@ class IS_File_Walker {
 
 				$paths[] = $relative;
 			}
-		} catch ( UnexpectedValueException $e ) {
+		} catch ( UnexpectedValueException $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch -- intentionally a no-op: the start directory itself was unreadable, return what we have.
 			// The start directory itself was unreadable; return what we have.
 		}
 
@@ -93,6 +118,11 @@ class IS_File_Walker {
 		return $paths;
 	}
 
+	/**
+	 * Whether a relative path matches one of the configured exclude patterns.
+	 *
+	 * @param string $relative_path Path relative to ABSPATH.
+	 */
 	public function is_excluded( $relative_path ) {
 		foreach ( $this->exclude_patterns as $pattern ) {
 			if ( '' === $pattern ) {
@@ -110,6 +140,8 @@ class IS_File_Walker {
 	/**
 	 * Resolves an absolute path to its ABSPATH-relative form, or null if
 	 * it doesn't resolve inside the webroot.
+	 *
+	 * @param string $abs_path Absolute filesystem path to resolve.
 	 */
 	public static function relative_to_abspath( $abs_path ) {
 		$root = realpath( ABSPATH );
@@ -124,6 +156,8 @@ class IS_File_Walker {
 	 * True if a relative path is inside wp-content/uploads/ -- used by
 	 * the scanner to flag executable PHP living somewhere it should
 	 * never be (uploads is meant for media, not code).
+	 *
+	 * @param string $relative_path Path relative to ABSPATH.
 	 */
 	public static function is_in_uploads( $relative_path ) {
 		$uploads          = wp_upload_dir();

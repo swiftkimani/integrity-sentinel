@@ -1,4 +1,11 @@
 <?php
+/**
+ * Opt-in, on-demand reputation lookups against external threat-intel
+ * services (AbuseIPDB for IPs, VirusTotal for file hashes).
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -23,6 +30,9 @@ class IS_Threat_Intel {
 	const CACHE_TTL            = DAY_IN_SECONDS;
 	const MAX_REQUESTS_PER_RUN = 20;
 
+	/**
+	 * Default settings, used to fill in anything missing from the stored option.
+	 */
 	public static function default_settings() {
 		return array(
 			'enabled'        => 0,
@@ -31,6 +41,9 @@ class IS_Threat_Intel {
 		);
 	}
 
+	/**
+	 * Stored settings, merged over default_settings().
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_threat_intel_settings', array() ), self::default_settings() );
 	}
@@ -39,7 +52,11 @@ class IS_Threat_Intel {
 	// Pure logic
 	// -----------------------------------------------------------------
 
-	/** Pure: AbuseIPDB's 0-100 confidence score, banded to our severity scale. */
+	/**
+	 * Pure: AbuseIPDB's 0-100 confidence score, banded to our severity scale.
+	 *
+	 * @param int $score AbuseIPDB confidence score (0-100).
+	 */
 	public static function severity_for_abuse_score( $score ) {
 		$score = (int) $score;
 		if ( $score >= 75 ) {
@@ -58,6 +75,7 @@ class IS_Threat_Intel {
 	 * Pure: extracts the fields we care about from AbuseIPDB's /check
 	 * response body.
 	 *
+	 * @param mixed $body Decoded JSON response body from AbuseIPDB's /check endpoint.
 	 * @return array{score:int,severity:string,total_reports:int,country:string}|null
 	 */
 	public static function parse_ip_report( $body ) {
@@ -78,6 +96,7 @@ class IS_Threat_Intel {
 	 * Pure: extracts the fields we care about from VirusTotal's file
 	 * report body.
 	 *
+	 * @param mixed $body Decoded JSON response body from VirusTotal's file-report endpoint.
 	 * @return array{malicious:int,suspicious:int,severity:string}|null
 	 */
 	public static function parse_hash_report( $body ) {
@@ -99,6 +118,10 @@ class IS_Threat_Intel {
 	// WP-dependent glue
 	// -----------------------------------------------------------------
 
+	/**
+	 * Consumes one unit of this run's hourly request budget; returns false
+	 * once MAX_REQUESTS_PER_RUN has been reached in the current hour.
+	 */
 	private static function consume_request_budget() {
 		$count = (int) get_transient( 'is_ti_request_count' );
 		if ( $count >= self::MAX_REQUESTS_PER_RUN ) {
@@ -108,7 +131,13 @@ class IS_Threat_Intel {
 		return true;
 	}
 
-	/** @return array|WP_Error */
+	/**
+	 * Looks up an IP's AbuseIPDB reputation, using the transient cache
+	 * before spending request budget on a fresh HTTP call.
+	 *
+	 * @param string $ip IP address to look up.
+	 * @return array|WP_Error
+	 */
 	public function lookup_ip( $ip ) {
 		$settings = self::settings();
 		if ( empty( $settings['enabled'] ) || '' === trim( (string) $settings['abuseipdb_key'] ) ) {
@@ -170,7 +199,13 @@ class IS_Threat_Intel {
 		return $result;
 	}
 
-	/** @return array|WP_Error */
+	/**
+	 * Looks up a file hash's VirusTotal reputation, using the transient
+	 * cache before spending request budget on a fresh HTTP call.
+	 *
+	 * @param string $sha256 SHA-256 hash of the file to look up.
+	 * @return array|WP_Error
+	 */
 	public function lookup_hash( $sha256 ) {
 		$settings = self::settings();
 		if ( empty( $settings['enabled'] ) || '' === trim( (string) $settings['virustotal_key'] ) ) {

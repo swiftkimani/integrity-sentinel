@@ -4,6 +4,8 @@
  * custom tables and removes its options/cron -- a security scanner's
  * findings history shouldn't linger in the database after the site
  * owner has deliberately removed it.
+ *
+ * @package Integrity_Sentinel
  */
 
 if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {

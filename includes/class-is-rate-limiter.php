@@ -1,4 +1,11 @@
 <?php
+/**
+ * Generic fixed-window rate limiter, transient-backed, keyed by an
+ * arbitrary (bucket, key) pair.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -20,6 +27,10 @@ class IS_Rate_Limiter {
 	/**
 	 * Pure: $record is shaped like {window_started_at, count}; a window
 	 * that has expired is treated as zero regardless of its stored count.
+	 *
+	 * @param array $record         Rate-limit record with window_started_at and count.
+	 * @param int   $now            Current timestamp.
+	 * @param int   $window_seconds Window length in seconds.
 	 */
 	public static function current_window_count( array $record, $now, $window_seconds ) {
 		if ( empty( $record['window_started_at'] ) || $record['window_started_at'] <= ( $now - $window_seconds ) ) {
@@ -28,10 +39,26 @@ class IS_Rate_Limiter {
 		return (int) ( $record['count'] ?? 0 );
 	}
 
+	/**
+	 * Pure: true if the current window's count is already at or above the limit.
+	 *
+	 * @param array $record         Rate-limit record with window_started_at and count.
+	 * @param int   $now            Current timestamp.
+	 * @param int   $limit          Max hits allowed per window.
+	 * @param int   $window_seconds Window length in seconds.
+	 */
 	public static function is_limited( array $record, $now, $limit, $window_seconds ) {
 		return self::current_window_count( $record, $now, $window_seconds ) >= $limit;
 	}
 
+	/**
+	 * Pure: returns a new record with the hit counted, starting a fresh
+	 * window if the previous one has expired.
+	 *
+	 * @param array $record         Rate-limit record with window_started_at and count.
+	 * @param int   $now            Current timestamp.
+	 * @param int   $window_seconds Window length in seconds.
+	 */
 	public static function record_hit( array $record, $now, $window_seconds ) {
 		$fresh = empty( $record['window_started_at'] ) || $record['window_started_at'] <= ( $now - $window_seconds );
 		return array(
@@ -44,6 +71,12 @@ class IS_Rate_Limiter {
 	// WP-dependent glue
 	// -----------------------------------------------------------------
 
+	/**
+	 * Builds the transient key for a given (bucket, key) pair.
+	 *
+	 * @param string $bucket Short module identifier (e.g. 'rest_api').
+	 * @param string $key    Per-subject key (e.g. an IP address).
+	 */
 	private static function transient_key( $bucket, $key ) {
 		return 'is_rl_' . $bucket . '_' . md5( (string) $key );
 	}

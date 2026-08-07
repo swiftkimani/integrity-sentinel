@@ -54,6 +54,16 @@ class IS_Detections {
 				'severity' => 'low',
 				'category' => 'inventory-change',
 			),
+			'honeypot_triggered'           => array(
+				'label'    => __( 'Honeypot path accessed', 'integrity-sentinel' ),
+				'severity' => 'critical',
+				'category' => 'deception',
+			),
+			'canary_token_used'            => array(
+				'label'    => __( 'Canary token used', 'integrity-sentinel' ),
+				'severity' => 'critical',
+				'category' => 'deception',
+			),
 		);
 	}
 

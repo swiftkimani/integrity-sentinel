@@ -134,4 +134,25 @@ class IpListTest extends TestCase {
 		$settings = array( 'trusted_ip_header' => 'X-Forwarded-For', 'trusted_proxy_ranges' => '203.0.113.0/24' );
 		$this->assertSame( '203.0.113.1', IS_IP_List::resolve_client_ip( $server, $settings ) );
 	}
+
+	// ---- temporary bans -------------------------------------------------
+
+	public function test_default_ban_record_is_not_active() {
+		$this->assertFalse( IS_IP_List::is_ban_active( IS_IP_List::default_ban_record(), 1000 ) );
+	}
+
+	public function test_ban_is_active_before_expiry() {
+		$record = array( 'banned_until' => 2000, 'reason' => 'honeypot_triggered' );
+		$this->assertTrue( IS_IP_List::is_ban_active( $record, 1000 ) );
+	}
+
+	public function test_ban_is_not_active_after_expiry() {
+		$record = array( 'banned_until' => 1000, 'reason' => 'honeypot_triggered' );
+		$this->assertFalse( IS_IP_List::is_ban_active( $record, 1000 ) );
+		$this->assertFalse( IS_IP_List::is_ban_active( $record, 1001 ) );
+	}
+
+	public function test_ban_with_no_banned_until_is_not_active() {
+		$this->assertFalse( IS_IP_List::is_ban_active( array( 'reason' => 'x' ), 1000 ) );
+	}
 }

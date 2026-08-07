@@ -35,6 +35,7 @@ class IS_Admin {
 		add_action( 'admin_post_is_check_ip_reputation', array( $this, 'handle_check_ip_reputation' ) );
 		add_action( 'admin_post_is_check_hash_reputation', array( $this, 'handle_check_hash_reputation' ) );
 		add_action( 'admin_post_is_download_sbom', array( $this, 'handle_download_sbom' ) );
+		add_action( 'admin_post_is_regenerate_canary_token', array( $this, 'handle_regenerate_canary_token' ) );
 	}
 
 	public function add_menu() {
@@ -361,6 +362,14 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_threat_intel_settings' ),
 			)
 		);
+		register_setting(
+			'is_deception_settings_group',
+			'is_deception_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_deception_settings' ),
+			)
+		);
 	}
 
 	public function sanitize_vulnerability_scanner_settings( $input ) {
@@ -421,6 +430,27 @@ class IS_Admin {
 		if ( $out['enabled'] !== $old['enabled'] ) {
 			// The keys themselves aren't logged -- only whether the feature's on.
 			IS_Audit_Log::record( 'threat_intel_settings_changed', array( 'enabled' => $out['enabled'] ) );
+		}
+
+		return $out;
+	}
+
+	public function sanitize_deception_settings( $input ) {
+		$old = IS_Deception::settings();
+		$out = array(
+			'enabled'      => empty( $input['enabled'] ) ? 0 : 1,
+			'ban_minutes'  => max( 1, min( 10080, (int) ( $input['ban_minutes'] ?? 60 ) ) ),
+			'canary_token' => $old['canary_token'], // never editable from this form -- only via the dedicated regenerate action
+		);
+
+		if ( $out['enabled'] !== $old['enabled'] || $out['ban_minutes'] !== $old['ban_minutes'] ) {
+			IS_Audit_Log::record(
+				'deception_settings_changed',
+				array(
+					'enabled'     => $out['enabled'],
+					'ban_minutes' => $out['ban_minutes'],
+				)
+			);
 		}
 
 		return $out;
@@ -1134,6 +1164,19 @@ class IS_Admin {
 		header( 'Content-Type: application/json; charset=utf-8' );
 		header( 'Content-Disposition: attachment; filename="integrity-sentinel-sbom-' . gmdate( 'Y-m-d' ) . '.json"' );
 		echo wp_json_encode( $document, JSON_PRETTY_PRINT );
+		exit;
+	}
+
+	public function handle_regenerate_canary_token() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
+		}
+		check_admin_referer( 'is_deception_action' );
+
+		IS_Deception::regenerate_canary_token();
+		IS_Audit_Log::record( 'canary_token_regenerated', array() );
+
+		wp_safe_redirect( admin_url( 'admin.php?page=integrity-sentinel-access' ) );
 		exit;
 	}
 
@@ -2346,9 +2389,89 @@ class IS_Admin {
 				</table>
 				<?php submit_button( __( 'Save bot blocking settings', 'integrity-sentinel' ) ); ?>
 			</form>
+
+			<?php $this->render_deception_section(); ?>
 		</div>
 		<?php
 		$this->render_shell_close();
+	}
+
+	/**
+	 * Active-defense traps: fake sensitive paths and a decoy canary
+	 * token, both wired to an immediate temporary IP ban + critical
+	 * detection on IS_Deception. See its class doc for the reasoning.
+	 */
+	private function render_deception_section() {
+		$settings = IS_Deception::settings();
+		?>
+		<h2><?php esc_html_e( 'Deception (honeypots & canary token)', 'integrity-sentinel' ); ?></h2>
+		<p class="description">
+			<?php esc_html_e( 'A small set of fake sensitive paths (a decoy .env, a decoy backup archive, ...) that no real visitor ever requests — touching one temporarily bans the IP and raises a critical alert. Plus one decoy "canary" URL you can plant somewhere an attacker exfiltrating secrets might find it (a comment, a fake "internal notes" doc, a decoy config file); visiting it triggers the same response.', 'integrity-sentinel' ); ?>
+		</p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_deception_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_deception_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Trap honeypot path and canary token access.', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="is_deception_ban_minutes"><?php esc_html_e( 'Temporary ban duration (minutes)', 'integrity-sentinel' ); ?></label></th>
+					<td><input type="number" min="1" max="10080" id="is_deception_ban_minutes" name="is_deception_settings[ban_minutes]" value="<?php echo esc_attr( $settings['ban_minutes'] ); ?>" class="small-text"></td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save deception settings', 'integrity-sentinel' ) ); ?>
+		</form>
+
+		<p>
+			<strong><?php esc_html_e( 'Canary bait URL:', 'integrity-sentinel' ); ?></strong>
+			<code><?php echo esc_html( IS_Deception::canary_url() ); ?></code>
+		</p>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" onsubmit="return confirm('<?php echo esc_js( __( 'Regenerate the canary token? The URL above will change, so update it anywhere you\'ve already planted it.', 'integrity-sentinel' ) ); ?>');">
+			<?php wp_nonce_field( 'is_deception_action' ); ?>
+			<input type="hidden" name="action" value="is_regenerate_canary_token">
+			<?php submit_button( __( 'Regenerate canary token', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+		</form>
+
+		<h3><?php esc_html_e( 'Recent honeypot triggers', 'integrity-sentinel' ); ?></h3>
+		<?php $this->render_deception_entries( 'detect_honeypot_triggered' ); ?>
+
+		<h3><?php esc_html_e( 'Recent canary token uses', 'integrity-sentinel' ); ?></h3>
+		<?php $this->render_deception_entries( 'detect_canary_token_used' ); ?>
+		<?php
+	}
+
+	private function render_deception_entries( $action ) {
+		$entries = IS_Audit_Log::entries_for_action( $action, 10 );
+		if ( empty( $entries ) ) {
+			echo '<p class="description">' . esc_html__( 'None yet.', 'integrity-sentinel' ) . '</p>';
+			return;
+		}
+		?>
+		<table class="widefat striped">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'When', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'IP', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'Detail', 'integrity-sentinel' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $entries as $entry ) : ?>
+					<tr>
+						<td><?php echo esc_html( $entry['created_at'] ); ?></td>
+						<td><?php echo esc_html( $entry['ip'] ); ?></td>
+						<td><code><?php echo esc_html( (string) $entry['detail'] ); ?></code></td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
+		<?php
 	}
 
 	// -----------------------------------------------------------------

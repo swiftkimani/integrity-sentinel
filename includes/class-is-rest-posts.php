@@ -1,4 +1,11 @@
 <?php
+/**
+ * REST endpoint for creating posts via Application Passwords, scoped by
+ * capability and rate-limited per user.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -19,10 +26,21 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Rest_Posts {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Rest_Posts|null
+	 */
 	private static $instance = null;
 
 	const RATE_LIMIT_WINDOW = HOUR_IN_SECONDS;
 
+	/**
+	 * Gets (and lazily creates) the singleton instance, wiring up hooks
+	 * the first time it is created.
+	 *
+	 * @return IS_Rest_Posts
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -31,6 +49,11 @@ class IS_Rest_Posts {
 		return self::$instance;
 	}
 
+	/**
+	 * Default settings for this module.
+	 *
+	 * @return array
+	 */
 	public static function default_settings() {
 		return array(
 			'enabled'    => 1,
@@ -38,10 +61,18 @@ class IS_Rest_Posts {
 		);
 	}
 
+	/**
+	 * Current settings, merged with the defaults.
+	 *
+	 * @return array
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_rest_posts_settings', array() ), self::default_settings() );
 	}
 
+	/**
+	 * Registers the REST route.
+	 */
 	private function hooks() {
 		add_action( 'rest_api_init', array( $this, 'register_routes' ) );
 	}
@@ -56,6 +87,10 @@ class IS_Rest_Posts {
 	 * 'publish' or 'private' from a user without publish_posts is
 	 * downgraded to 'pending' (submitted for review) rather than
 	 * rejected outright, so the integration still succeeds.
+	 *
+	 * @param string $requested   Post status requested by the caller.
+	 * @param bool   $can_publish Whether the authenticated user has publish_posts.
+	 * @return string Resolved post status.
 	 */
 	public static function sanitize_status( $requested, $can_publish ) {
 		$requested = is_string( $requested ) ? strtolower( trim( $requested ) ) : '';
@@ -72,6 +107,11 @@ class IS_Rest_Posts {
 	 * Pure: fixed-window rate limiter. $record is shaped like
 	 * {window_started_at, count}; a window that has expired is treated
 	 * as zero regardless of its stored count.
+	 *
+	 * @param array $record         Rate-limit record ({window_started_at, count}).
+	 * @param int   $now            Current timestamp.
+	 * @param int   $window_seconds Length of the rate-limit window, in seconds.
+	 * @return int Number of requests counted in the current window.
 	 */
 	public static function current_window_count( array $record, $now, $window_seconds ) {
 		if ( empty( $record['window_started_at'] ) || $record['window_started_at'] <= ( $now - $window_seconds ) ) {
@@ -80,10 +120,28 @@ class IS_Rest_Posts {
 		return (int) ( $record['count'] ?? 0 );
 	}
 
+	/**
+	 * Pure: whether the current window's request count has reached the limit.
+	 *
+	 * @param array $record         Rate-limit record ({window_started_at, count}).
+	 * @param int   $now            Current timestamp.
+	 * @param int   $limit          Maximum requests allowed per window.
+	 * @param int   $window_seconds Length of the rate-limit window, in seconds.
+	 * @return bool
+	 */
 	public static function is_rate_limited( array $record, $now, $limit, $window_seconds ) {
 		return self::current_window_count( $record, $now, $window_seconds ) >= $limit;
 	}
 
+	/**
+	 * Pure: returns an updated rate-limit record reflecting one more
+	 * request, starting a fresh window if the previous one has expired.
+	 *
+	 * @param array $record         Rate-limit record ({window_started_at, count}).
+	 * @param int   $now            Current timestamp.
+	 * @param int   $window_seconds Length of the rate-limit window, in seconds.
+	 * @return array Updated rate-limit record.
+	 */
 	public static function record_request( array $record, $now, $window_seconds ) {
 		$fresh = empty( $record['window_started_at'] ) || $record['window_started_at'] <= ( $now - $window_seconds );
 		return array(
@@ -96,10 +154,19 @@ class IS_Rest_Posts {
 	// WP-dependent glue
 	// -----------------------------------------------------------------
 
+	/**
+	 * Transient key used to store a user's rate-limit record.
+	 *
+	 * @param int $user_id User ID.
+	 * @return string
+	 */
 	private static function rate_limit_key( $user_id ) {
 		return 'is_rest_posts_rl_' . (int) $user_id;
 	}
 
+	/**
+	 * Registers the integrity-sentinel/v1/posts REST route, if the module is enabled.
+	 */
 	public function register_routes() {
 		if ( empty( self::settings()['enabled'] ) ) {
 			return;
@@ -142,6 +209,12 @@ class IS_Rest_Posts {
 		);
 	}
 
+	/**
+	 * REST permission callback: requires an authenticated user with
+	 * edit_posts, and applies this endpoint's per-user rate limit.
+	 *
+	 * @return true|WP_Error
+	 */
 	public function check_permission() {
 		if ( ! is_user_logged_in() ) {
 			return new WP_Error( 'is_rest_posts_unauthorized', __( 'Authentication required. Use a WordPress Application Password.', 'integrity-sentinel' ), array( 'status' => 401 ) );
@@ -160,6 +233,13 @@ class IS_Rest_Posts {
 		return true;
 	}
 
+	/**
+	 * REST callback: creates a post from the request parameters,
+	 * recording the request against the rate limit first.
+	 *
+	 * @param WP_REST_Request $request Incoming REST request.
+	 * @return WP_REST_Response|WP_Error
+	 */
 	public function handle_create( WP_REST_Request $request ) {
 		return IS_Guard::run(
 			'rest_posts',

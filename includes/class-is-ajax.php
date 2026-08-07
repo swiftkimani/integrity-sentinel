@@ -1,4 +1,10 @@
 <?php
+/**
+ * Admin-ajax endpoints backing the Dashboard's scan controls and finding actions.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -13,9 +19,17 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Ajax {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Ajax|null
+	 */
 	private static $instance = null;
 	const NONCE_ACTION       = 'is_ajax_nonce';
 
+	/**
+	 * Returns the singleton instance, creating and hooking it on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -24,6 +38,9 @@ class IS_Ajax {
 		return self::$instance;
 	}
 
+	/**
+	 * Registers this module's admin-ajax action hooks.
+	 */
 	private function hooks() {
 		add_action( 'wp_ajax_is_start_scan', array( $this, 'start_scan' ) );
 		add_action( 'wp_ajax_is_scan_batch', array( $this, 'scan_batch' ) );
@@ -33,6 +50,9 @@ class IS_Ajax {
 		add_action( 'wp_ajax_is_preview_login_design', array( $this, 'preview_login_design' ) );
 	}
 
+	/**
+	 * Rejects the request unless the current user can manage_options and the request carries a valid plugin nonce.
+	 */
 	private function guard() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_send_json_error( array( 'message' => __( 'Insufficient permissions.', 'integrity-sentinel' ) ), 403 );
@@ -40,6 +60,9 @@ class IS_Ajax {
 		check_ajax_referer( self::NONCE_ACTION, 'nonce' );
 	}
 
+	/**
+	 * Starts a new manual scan run and returns its run ID.
+	 */
 	public function start_scan() {
 		$this->guard();
 		$scanner = new IS_Scanner();
@@ -47,6 +70,9 @@ class IS_Ajax {
 		wp_send_json_success( array( 'run_id' => $run_id ) );
 	}
 
+	/**
+	 * Processes the next batch of a running scan and returns its progress.
+	 */
 	public function scan_batch() {
 		$this->guard();
 		$run_id = isset( $_POST['run_id'] ) ? (int) $_POST['run_id'] : 0;
@@ -65,6 +91,9 @@ class IS_Ajax {
 		wp_send_json_success( $progress );
 	}
 
+	/**
+	 * Returns whether a scan is currently running and, if so, its progress.
+	 */
 	public function scan_status() {
 		$this->guard();
 		$db  = IS_DB::instance();
@@ -82,6 +111,9 @@ class IS_Ajax {
 		);
 	}
 
+	/**
+	 * Updates a finding's status (acknowledged/ignored/resolved/new) and records the change to the audit log.
+	 */
 	public function set_finding_status() {
 		$this->guard();
 		$id     = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0;

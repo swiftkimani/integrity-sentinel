@@ -1,4 +1,11 @@
 <?php
+/**
+ * PHP-execution blocking for writable directories, plus the hardening
+ * configuration/permission/exposure/account audit.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -26,6 +33,9 @@ class IS_Hardening {
 	// Uploads PHP-execution block
 	// ---------------------------------------------------------------
 
+	/**
+	 * Path to the uploads directory's .htaccess file.
+	 */
 	public static function uploads_htaccess_path() {
 		$uploads = wp_upload_dir();
 		return trailingslashit( $uploads['basedir'] ) . '.htaccess';
@@ -68,10 +78,20 @@ class IS_Hardening {
 		);
 	}
 
+	/**
+	 * Path to $abs_dir's .htaccess file.
+	 *
+	 * @param string $abs_dir Absolute path to the directory.
+	 */
 	public static function htaccess_path_for( $abs_dir ) {
 		return trailingslashit( $abs_dir ) . '.htaccess';
 	}
 
+	/**
+	 * Whether our marker-delimited PHP-execution block is currently present in $abs_dir/.htaccess.
+	 *
+	 * @param string $abs_dir Absolute path to the directory.
+	 */
 	public static function block_active_for( $abs_dir ) {
 		$path = self::htaccess_path_for( $abs_dir );
 		if ( ! file_exists( $path ) || ! is_readable( $path ) ) {
@@ -84,6 +104,7 @@ class IS_Hardening {
 	 * Appends our marker-delimited block to $abs_dir/.htaccess,
 	 * preserving any existing rules.
 	 *
+	 * @param string $abs_dir Absolute path to the directory to protect.
 	 * @return true|WP_Error
 	 */
 	public static function apply_block_for( $abs_dir ) {
@@ -106,6 +127,7 @@ class IS_Hardening {
 	 * Removes ONLY our marker-delimited block from $abs_dir/.htaccess,
 	 * leaving anything else in the file untouched.
 	 *
+	 * @param string $abs_dir Absolute path to the directory to unprotect.
 	 * @return true|WP_Error
 	 */
 	public static function remove_block_for( $abs_dir ) {
@@ -156,13 +178,21 @@ class IS_Hardening {
 		return self::block_active_for( $uploads['basedir'] );
 	}
 
-	/** @return true|WP_Error */
+	/**
+	 * Applies the PHP-execution block to the uploads directory.
+	 *
+	 * @return true|WP_Error
+	 */
 	public static function apply_uploads_block() {
 		$uploads = wp_upload_dir();
 		return self::apply_block_for( $uploads['basedir'] );
 	}
 
-	/** @return true|WP_Error */
+	/**
+	 * Removes the PHP-execution block from the uploads directory.
+	 *
+	 * @return true|WP_Error
+	 */
 	public static function remove_uploads_block() {
 		$uploads = wp_upload_dir();
 		return self::remove_block_for( $uploads['basedir'] );
@@ -175,6 +205,8 @@ class IS_Hardening {
 	/**
 	 * Records every hardening finding for a run.
 	 *
+	 * @param int   $run_id Scan run ID findings are recorded against.
+	 * @param IS_DB $db     Database access object.
 	 * @return int Number of NEW findings.
 	 */
 	public function run_checks( $run_id, IS_DB $db ) {
@@ -190,6 +222,8 @@ class IS_Hardening {
 	}
 
 	/**
+	 * Runs every hardening check and returns their combined findings.
+	 *
 	 * @return array<array{file_path:string,severity:string,rule_id:string,detail:string}>
 	 */
 	public function collect_findings() {
@@ -214,6 +248,8 @@ class IS_Hardening {
 	 * Pure: which of the dangerous shell-execution functions are NOT
 	 * listed in a disable_functions ini value. No WordPress/ini calls --
 	 * unit-testable on its own.
+	 *
+	 * @param string $disable_functions_value Raw disable_functions ini value.
 	 */
 	public static function still_enabled_dangerous_functions( $disable_functions_value ) {
 		$disabled = array_filter( array_map( 'trim', explode( ',', (string) $disable_functions_value ) ) );
@@ -246,6 +282,14 @@ class IS_Hardening {
 		);
 	}
 
+	/**
+	 * Builds a single finding array in the shape record_finding() expects.
+	 *
+	 * @param string $rule_id   Machine-readable rule identifier.
+	 * @param string $severity  Finding severity.
+	 * @param string $file_path Path or label the finding is about.
+	 * @param string $detail    Human-readable explanation.
+	 */
 	private function finding( $rule_id, $severity, $file_path, $detail ) {
 		return array(
 			'file_path' => $file_path,
@@ -255,6 +299,10 @@ class IS_Hardening {
 		);
 	}
 
+	/**
+	 * Checks wp-config.php/php.ini settings: file editor, debug display,
+	 * weak auth salts, default table prefix, allow_url_include, PHP EOL.
+	 */
 	private function check_config() {
 		$out = array();
 
@@ -330,7 +378,11 @@ class IS_Hardening {
 		return $out;
 	}
 
-	/** True if a salt/key constant value is unusable as a secret. */
+	/**
+	 * True if a salt/key constant value is unusable as a secret.
+	 *
+	 * @param mixed $value The constant's current value.
+	 */
 	public static function is_weak_salt_value( $value ) {
 		return ! is_string( $value )
 			|| strlen( $value ) < 32
@@ -346,7 +398,7 @@ class IS_Hardening {
 	 * secrets into one -- and is_weak_salt_value() alone can't catch it,
 	 * since a duplicated value can still be long and non-placeholder.
 	 *
-	 * @param array<string,string> $salts constant name => value
+	 * @param array<string,string> $salts constant name => value.
 	 * @return string[] constant names involved in a duplicate, empty if none
 	 */
 	public static function duplicate_salt_names( array $salts ) {
@@ -367,6 +419,9 @@ class IS_Hardening {
 		return array_values( array_unique( $dupes ) );
 	}
 
+	/**
+	 * Checks whether any of the auth keys/salts share an identical value.
+	 */
 	private function check_salt_uniqueness() {
 		$salts = array();
 		foreach ( self::SALT_CONSTANTS as $name ) {
@@ -397,7 +452,7 @@ class IS_Hardening {
 	 * by convention; this is transparency about THIS plugin's own
 	 * storage, not a claim it's uniquely at fault.
 	 *
-	 * @param array<string,array<string,mixed>> $all_settings
+	 * @param array<string,array<string,mixed>> $all_settings Option name => decoded settings array.
 	 * @return string[] option names holding a non-empty secret-shaped field
 	 */
 	public static function options_with_plaintext_secrets( array $all_settings ) {
@@ -414,6 +469,9 @@ class IS_Hardening {
 		return $out;
 	}
 
+	/**
+	 * Flags plugin-owned option rows that hold a configured external API key/secret.
+	 */
 	private function check_plaintext_secrets() {
 		$flagged = self::options_with_plaintext_secrets(
 			array(
@@ -439,6 +497,9 @@ class IS_Hardening {
 		);
 	}
 
+	/**
+	 * Checks core paths (wp-config.php, ABSPATH, wp-content, uploads) for world-writable permissions.
+	 */
 	private function check_world_writable() {
 		if ( 0 === stripos( PHP_OS, 'WIN' ) ) {
 			return array(); // Unix permission bits are meaningless here.
@@ -470,11 +531,18 @@ class IS_Hardening {
 		return $out;
 	}
 
-	/** True if a filename looks like a database dump or site backup. */
+	/**
+	 * True if a filename looks like a database dump or site backup.
+	 *
+	 * @param string $filename Filename to check (no path).
+	 */
 	public static function looks_like_backup_file( $filename ) {
 		return (bool) preg_match( '/\.(?:sql|sql\.gz|zip|tar\.gz|tgz|bak)$/i', $filename );
 	}
 
+	/**
+	 * Scans the webroot for files that look like database dumps or backup archives.
+	 */
 	private function check_backup_archives() {
 		$out   = array();
 		$items = @scandir( ABSPATH ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
@@ -495,6 +563,9 @@ class IS_Hardening {
 		return $out;
 	}
 
+	/**
+	 * Flags the uploads directory when its PHP-execution block isn't applied.
+	 */
 	private function check_uploads_exec_block() {
 		if ( self::uploads_block_active() ) {
 			return array();
@@ -558,7 +629,7 @@ class IS_Hardening {
 				)
 			);
 			if ( is_wp_error( $response ) ) {
-				continue; // host blocks loopback requests -- can't tell, don't guess
+				continue; // host blocks loopback requests -- can't tell, don't guess.
 			}
 			if ( 200 === wp_remote_retrieve_response_code( $response ) && '' !== trim( wp_remote_retrieve_body( $response ) ) ) {
 				$out[] = $this->finding( $t['rule'], $t['severity'], $t['path'], $t['detail'] );
@@ -577,6 +648,9 @@ class IS_Hardening {
 		return $out;
 	}
 
+	/**
+	 * Flags a literal "admin" account and administrators created since the last scan.
+	 */
 	private function check_administrators() {
 		$out    = array();
 		$admins = get_users(
@@ -652,7 +726,7 @@ class IS_Hardening {
 					array( 'timeout' => 10 )
 				);
 				if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) {
-					continue; // transient network problem -- retry next scan
+					continue; // transient network problem -- retry next scan.
 				}
 				$body  = json_decode( wp_remote_retrieve_body( $response ), true );
 				$state = ( is_array( $body ) && ! empty( $body['closed'] ) ) ? 'closed' : 'ok';
@@ -675,6 +749,9 @@ class IS_Hardening {
 		return $out;
 	}
 
+	/**
+	 * Flags when a WordPress core update is available.
+	 */
 	private function check_core_update() {
 		$updates = get_site_transient( 'update_core' );
 		if ( ! $updates || empty( $updates->updates ) || ! is_array( $updates->updates ) ) {

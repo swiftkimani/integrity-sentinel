@@ -1,4 +1,10 @@
 <?php
+/**
+ * WP-CLI commands for Integrity Sentinel.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -102,7 +108,7 @@ class IS_CLI {
 
 		if ( (int) $progress['findings_new'] > 0 ) {
 			WP_CLI::log( 'Review them with: wp integrity-sentinel findings' );
-			WP_CLI::halt( 1 ); // non-zero exit so a crontab/CI wrapper can alert on findings
+			WP_CLI::halt( 1 ); // non-zero exit so a crontab/CI wrapper can alert on findings.
 		}
 	}
 

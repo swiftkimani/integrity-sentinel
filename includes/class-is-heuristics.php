@@ -1,4 +1,11 @@
 <?php
+/**
+ * Pattern-based malware/webshell heuristics: rule definitions and the
+ * content-scanning logic that runs them.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -26,6 +33,8 @@ class IS_Heuristics {
 	const MAX_MATCHES_PER_RULE = 10;
 
 	/**
+	 * The full set of regex-based heuristic rules.
+	 *
 	 * @return array<array{id:string,label:string,severity:string,pattern:string}>
 	 */
 	public static function rules() {
@@ -161,6 +170,7 @@ class IS_Heuristics {
 	 * HTML-escaped by the caller before display -- this method returns
 	 * plain text).
 	 *
+	 * @param string $content File content to scan.
 	 * @return array<array{rule_id:string,label:string,severity:string,matches:array<array{line:int,snippet:string}>}>
 	 */
 	public static function scan_content( $content ) {
@@ -209,7 +219,7 @@ class IS_Heuristics {
 
 	const DANGEROUS_CONCAT_FUNCTION_NAMES = array( 'eval', 'assert', 'system', 'exec', 'passthru', 'shell_exec', 'popen', 'proc_open', 'create_function' );
 	const HIGH_ENTROPY_MIN_LENGTH         = 200;
-	const HIGH_ENTROPY_THRESHOLD          = 4.8; // bits/byte, out of a max of 8.0 -- natural text/code sits well under this
+	const HIGH_ENTROPY_THRESHOLD          = 4.8; // bits/byte, out of a max of 8.0 -- natural text/code sits well under this.
 
 	/**
 	 * Spots a dangerous function name spelled via adjacent
@@ -220,6 +230,7 @@ class IS_Heuristics {
 	 * catches hex/XOR/custom encodings that long_base64_blob's
 	 * base64-charset pattern would miss.
 	 *
+	 * @param string $content File content to scan.
 	 * @return array<array{rule_id:string,label:string,severity:string,matches:array}>
 	 */
 	private static function custom_checks( $content ) {
@@ -251,6 +262,13 @@ class IS_Heuristics {
 		return $out;
 	}
 
+	/**
+	 * Builds the {line, snippet} pair for a byte offset into $content.
+	 *
+	 * @param string $content File content the offset is within.
+	 * @param int    $offset  Byte offset of the match.
+	 * @return array{line:int,snippet:string}
+	 */
 	private static function line_context( $content, $offset ) {
 		$line_no = substr_count( substr( $content, 0, $offset ), "\n" ) + 1;
 		$lines   = explode( "\n", $content );
@@ -271,6 +289,7 @@ class IS_Heuristics {
 	 * known_webshell_marker concatenations -- those segments contain
 	 * digits or regex metacharacters, not plain letters.
 	 *
+	 * @param string $content File content to scan.
 	 * @return array{name:string,offset:int}|null
 	 */
 	public static function find_concatenated_dangerous_function_name( $content ) {
@@ -293,6 +312,9 @@ class IS_Heuristics {
 	 * Pure: Shannon entropy in bits per byte. Natural text and typical
 	 * source code sit well under 4.5; base64/hex/binary-packed data
 	 * commonly sits at 4.8+.
+	 *
+	 * @param string $string String to measure.
+	 * @return float Entropy in bits per byte.
 	 */
 	public static function shannon_entropy( $string ) {
 		$len = strlen( $string );
@@ -311,6 +333,7 @@ class IS_Heuristics {
 	 * Pure: long quoted string literals whose entropy exceeds the
 	 * threshold, capped the same way rule matches are.
 	 *
+	 * @param string $content File content to scan.
 	 * @return array<array{offset:int}>
 	 */
 	public static function find_high_entropy_blobs( $content ) {

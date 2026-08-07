@@ -1,4 +1,12 @@
 <?php
+/**
+ * Per-module fault isolation: hardening/detection modules run through a
+ * circuit breaker here so one module's failure can't take down the rest
+ * of the site.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -89,6 +97,8 @@ class IS_Guard {
 	 * Health state to persist after a successful run: status/failures/
 	 * disabled_until reset, but the last error is kept for the health
 	 * panel's benefit even after recovery.
+	 *
+	 * @param array $health Current health record (used only for its last-error fields).
 	 */
 	public static function success_state( array $health ) {
 		return array_merge(
@@ -107,6 +117,12 @@ class IS_Guard {
 	 * the circuit breaker (as opposed to one more failure while it's
 	 * already tripped). No WordPress calls -- fully unit-testable.
 	 *
+	 * @param array  $health    Module's current health record.
+	 * @param int    $now       Current unix timestamp.
+	 * @param string $message   The new failure's error message.
+	 * @param int    $threshold Number of failures within $window that trips the breaker.
+	 * @param int    $window    Rolling window, in seconds, that failures are counted over.
+	 * @param int    $cooldown  Seconds the module stays disabled once tripped.
 	 * @return array{state: array, tripped: bool}
 	 */
 	public static function failure_state( array $health, $now, $message, $threshold, $window, $cooldown ) {
@@ -145,11 +161,19 @@ class IS_Guard {
 		);
 	}
 
+	/**
+	 * Current health record for a module, filled in with defaults for any missing keys.
+	 *
+	 * @param string $module Short machine-readable module identifier.
+	 */
 	public static function health( $module ) {
 		$all = get_option( self::HEALTH_OPTION, array() );
 		return isset( $all[ $module ] ) ? wp_parse_args( $all[ $module ], self::default_health() ) : self::default_health();
 	}
 
+	/**
+	 * Health records for every module that has ever recorded state, filled in with defaults.
+	 */
 	public static function all_health() {
 		$all = get_option( self::HEALTH_OPTION, array() );
 		$out = array();
@@ -161,6 +185,8 @@ class IS_Guard {
 
 	/**
 	 * Manually clear a module's degraded/disabled state (admin action).
+	 *
+	 * @param string $module Short machine-readable module identifier.
 	 */
 	public static function reset( $module ) {
 		$all = get_option( self::HEALTH_OPTION, array() );
@@ -168,12 +194,26 @@ class IS_Guard {
 		update_option( self::HEALTH_OPTION, $all, false );
 	}
 
+	/**
+	 * Persist a module's health record.
+	 *
+	 * @param string $module Short machine-readable module identifier.
+	 * @param array  $state  Health record to store, shaped like default_health().
+	 */
 	private static function persist( $module, array $state ) {
 		$all            = get_option( self::HEALTH_OPTION, array() );
 		$all[ $module ] = $state;
 		update_option( self::HEALTH_OPTION, $all, false );
 	}
 
+	/**
+	 * Record a module's failure: log it, update its health record via
+	 * failure_state(), write an audit-log entry, and notify if this
+	 * failure is the one that tripped the circuit breaker.
+	 *
+	 * @param string    $module Short machine-readable module identifier.
+	 * @param Throwable $e      The exception the module threw.
+	 */
 	private static function handle_failure( $module, Throwable $e ) {
 		$message = $e->getMessage() . ' in ' . basename( $e->getFile() ) . ':' . $e->getLine();
 

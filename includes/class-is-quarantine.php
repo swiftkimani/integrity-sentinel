@@ -1,4 +1,11 @@
 <?php
+/**
+ * Quarantine: suspends flagged files (moves them out of harm's way)
+ * rather than deleting them, under explicit human control only.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -43,6 +50,12 @@ class IS_Quarantine {
 	// Pure logic
 	// -------------------------------------------------------------------
 
+	/**
+	 * Pure: whether a finding's issue type is one this module quarantines.
+	 *
+	 * @param string $issue_type Finding's issue_type value.
+	 * @return bool
+	 */
 	public static function is_eligible_issue_type( $issue_type ) {
 		return in_array( $issue_type, self::ELIGIBLE_ISSUE_TYPES, true );
 	}
@@ -51,6 +64,10 @@ class IS_Quarantine {
 	 * Pure: the actual protected-path check, parameterized on the
 	 * plugin's own relative directory so it's testable without needing
 	 * IS_PLUGIN_DIR/ABSPATH defined.
+	 *
+	 * @param string $relative_path       Path relative to ABSPATH.
+	 * @param string $plugin_relative_dir This plugin's own directory, relative to ABSPATH.
+	 * @return bool
 	 */
 	public static function is_protected_relative_path( $relative_path, $plugin_relative_dir ) {
 		$relative_path = ltrim( (string) $relative_path, '/' );
@@ -67,6 +84,10 @@ class IS_Quarantine {
 	 * basename from different directories never collide, and the name
 	 * itself carries no clue about the original file. The .quarantined
 	 * extension is never executable regardless of server config.
+	 *
+	 * @param string $relative_path Original path relative to ABSPATH.
+	 * @param int    $timestamp     Timestamp to encode in the filename.
+	 * @return string
 	 */
 	public static function quarantine_filename( $relative_path, $timestamp ) {
 		return $timestamp . '-' . substr( hash( 'sha256', (string) $relative_path ), 0, 16 ) . '.quarantined';
@@ -76,11 +97,23 @@ class IS_Quarantine {
 	// WP-dependent glue
 	// -------------------------------------------------------------------
 
+	/**
+	 * Whether $relative_path is protected from quarantine (a core
+	 * bootstrap file, or something inside this plugin's own directory).
+	 *
+	 * @param string $relative_path Path relative to ABSPATH.
+	 * @return bool
+	 */
 	public static function is_protected_path( $relative_path ) {
 		$plugin_rel = defined( 'IS_PLUGIN_DIR' ) ? IS_File_Walker::relative_to_abspath( IS_PLUGIN_DIR ) : null;
 		return self::is_protected_relative_path( $relative_path, null === $plugin_rel ? '' : $plugin_rel );
 	}
 
+	/**
+	 * Absolute path to this site's quarantine directory (inside uploads).
+	 *
+	 * @return string
+	 */
 	public static function quarantine_dir() {
 		$uploads = wp_upload_dir();
 		return trailingslashit( $uploads['basedir'] ) . self::DIR_NAME;
@@ -111,6 +144,8 @@ class IS_Quarantine {
 	 * Never deletes it -- restore/delete_permanently are separate,
 	 * explicit, human-approved actions.
 	 *
+	 * @param array $finding Finding record being quarantined.
+	 * @param int   $user_id ID of the user performing the action.
 	 * @return int|WP_Error New quarantine record ID, or WP_Error.
 	 */
 	public static function quarantine_finding( array $finding, $user_id ) {
@@ -181,7 +216,13 @@ class IS_Quarantine {
 		return $id;
 	}
 
-	/** @return true|WP_Error */
+	/**
+	 * Restores a quarantined file back to its original location.
+	 *
+	 * @param int $id      Quarantine record ID.
+	 * @param int $user_id ID of the user performing the action.
+	 * @return true|WP_Error
+	 */
 	public static function restore( $id, $user_id ) {
 		$item = IS_DB::instance()->get_quarantine_item( $id );
 		if ( ! $item || 'quarantined' !== $item['status'] ) {
@@ -220,7 +261,13 @@ class IS_Quarantine {
 		return true;
 	}
 
-	/** @return true|WP_Error */
+	/**
+	 * Permanently deletes a quarantined file from disk.
+	 *
+	 * @param int $id      Quarantine record ID.
+	 * @param int $user_id ID of the user performing the action.
+	 * @return true|WP_Error
+	 */
 	public static function delete_permanently( $id, $user_id ) {
 		$item = IS_DB::instance()->get_quarantine_item( $id );
 		if ( ! $item || 'quarantined' !== $item['status'] ) {

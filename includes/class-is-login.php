@@ -1,4 +1,10 @@
 <?php
+/**
+ * Login URL hiding (custom slug/subdomain) and per-IP login rate limiting.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -32,8 +38,16 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Login {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var self|null
+	 */
 	private static $instance = null;
 
+	/**
+	 * Returns the singleton instance, creating and hooking it up on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -42,6 +56,9 @@ class IS_Login {
 		return self::$instance;
 	}
 
+	/**
+	 * Wires the login-url-rename and login-rate-limit hooks.
+	 */
 	private function hooks() {
 		// 'init', not 'plugins_loaded': this class is instantiated from
 		// is_init(), itself a 'plugins_loaded' callback -- a callback
@@ -62,6 +79,9 @@ class IS_Login {
 	// Login URL rename
 	// ===================================================================
 
+	/**
+	 * Default rename settings, used to fill in anything missing from the stored option.
+	 */
 	public static function default_rename_settings() {
 		return array(
 			'login_slug' => '',
@@ -69,6 +89,9 @@ class IS_Login {
 		);
 	}
 
+	/**
+	 * Returns the stored login-rename settings merged over the defaults.
+	 */
 	public static function rename_settings() {
 		return wp_parse_args( get_option( 'is_login_rename_settings', array() ), self::default_rename_settings() );
 	}
@@ -77,6 +100,8 @@ class IS_Login {
 	 * Pure: normalizes a raw admin-entered slug down to safe characters
 	 * and rejects anything that collides with a literal WordPress core
 	 * path (which would create a conflict or an infinite loop).
+	 *
+	 * @param string $raw Raw, admin-entered slug.
 	 */
 	public static function sanitize_login_slug( $raw ) {
 		$slug = strtolower( trim( (string) $raw ) );
@@ -110,7 +135,11 @@ class IS_Login {
 		return in_array( $slug, $reserved, true ) ? '' : $slug;
 	}
 
-	/** Pure: strips the query string, decodes, and lowercases a request path. */
+	/**
+	 * Pure: strips the query string, decodes, and lowercases a request path.
+	 *
+	 * @param string $uri Raw request URI.
+	 */
 	public static function normalize_path( $uri ) {
 		$uri = (string) $uri;
 		$q   = strpos( $uri, '?' );
@@ -130,6 +159,8 @@ class IS_Login {
 	 * common Apache/mod_php default), so an exact-suffix-only check
 	 * would leave that variant unblocked -- a real bypass of the "old
 	 * default route" 404, not just a cosmetic gap.
+	 *
+	 * @param string $normalized_path Path as returned by normalize_path().
 	 */
 	public static function is_wp_login_request( $normalized_path ) {
 		return (bool) preg_match( '#/wp-login\.php(?:/.*)?$#', $normalized_path );
@@ -139,6 +170,8 @@ class IS_Login {
 	 * Pure: does this request target the wp-admin directory itself (any
 	 * file under it, or the bare directory)? Matches subdirectory
 	 * installs too ("/blog/wp-admin/..."), not just a site root.
+	 *
+	 * @param string $normalized_path Path as returned by normalize_path().
 	 */
 	public static function is_wp_admin_request( $normalized_path ) {
 		return (bool) preg_match( '#(?:^|/)wp-admin(?:/.*)?$#', $normalized_path );
@@ -152,6 +185,8 @@ class IS_Login {
 	 * form submissions, and blocking them would break unrelated site
 	 * functionality for zero security benefit -- neither one exposes an
 	 * authentication form.
+	 *
+	 * @param string $normalized_path Path as returned by normalize_path().
 	 */
 	public static function should_allow_direct_wp_admin( $normalized_path ) {
 		return (bool) preg_match( '#/wp-admin/admin-(?:ajax|post)\.php$#', $normalized_path );
@@ -161,6 +196,8 @@ class IS_Login {
 	 * Pure: normalizes a raw admin-entered hostname (which may have been
 	 * pasted as a full URL) down to a bare, comparable host. Rejects
 	 * anything that isn't a plausible hostname.
+	 *
+	 * @param string $raw Raw, admin-entered host (may be a full URL).
 	 */
 	public static function sanitize_login_host( $raw ) {
 		$host = strtolower( trim( (string) $raw ) );
@@ -174,7 +211,12 @@ class IS_Login {
 		return $host;
 	}
 
-	/** Pure: does the request's Host header match the configured login host? */
+	/**
+	 * Pure: does the request's Host header match the configured login host?
+	 *
+	 * @param string $host_header     Raw Host header from the request.
+	 * @param string $configured_host Configured login host to compare against.
+	 */
 	public static function is_configured_login_host( $host_header, $configured_host ) {
 		if ( '' === $configured_host ) {
 			return false;
@@ -184,7 +226,12 @@ class IS_Login {
 		return $host === $configured_host;
 	}
 
-	/** Pure: does the request's last path segment match the configured slug exactly? */
+	/**
+	 * Pure: does the request's last path segment match the configured slug exactly?
+	 *
+	 * @param string $normalized_path Path as returned by normalize_path().
+	 * @param string $slug            Configured login slug to compare against.
+	 */
 	public static function path_matches_slug( $normalized_path, $slug ) {
 		if ( '' === $slug || '' === $normalized_path ) {
 			return false;
@@ -206,13 +253,20 @@ class IS_Login {
 	 * reset flow would 404 for anyone not already on that subdomain.
 	 * Both are gated by a single-use, time-limited key, same as
 	 * 'postpass' above -- not the credential form itself.
+	 *
+	 * @param array $get Superglobal-shaped array of GET parameters (e.g. $_GET).
 	 */
 	public static function should_allow_direct_wp_login( array $get ) {
 		$action = isset( $get['action'] ) ? (string) $get['action'] : '';
 		return in_array( $action, array( 'postpass', 'logout', 'confirmaction', 'confirm_admin_email', 'rp', 'resetpass' ), true );
 	}
 
-	/** Pure: rewrites a wp-login.php URL to use the custom slug instead. */
+	/**
+	 * Pure: rewrites a wp-login.php URL to use the custom slug instead.
+	 *
+	 * @param string $url  URL to rewrite.
+	 * @param string $slug Configured login slug.
+	 */
 	public static function rewrite_login_url( $url, $slug ) {
 		if ( '' === $slug || false === stripos( $url, 'wp-login.php' ) ) {
 			return $url;
@@ -220,6 +274,13 @@ class IS_Login {
 		return str_ireplace( 'wp-login.php', $slug, $url );
 	}
 
+	/**
+	 * Filter callback for the 'site_url'/'network_site_url' filters:
+	 * rewrites wp-login.php links to use the configured slug, if any.
+	 *
+	 * @param string $url  URL being filtered.
+	 * @param string $path Requested path component (unused; kept to match the filter signature).
+	 */
 	public function filter_site_url( $url, $path ) {
 		return IS_Guard::run(
 			'login_rename',
@@ -376,6 +437,9 @@ a.is-404-button:hover{opacity:.88;}
 	// Login rate limiting
 	// ===================================================================
 
+	/**
+	 * Default throttle settings, used to fill in anything missing from the stored option.
+	 */
 	public static function default_throttle_settings() {
 		return array(
 			'enabled'                       => 1,
@@ -386,10 +450,16 @@ a.is-404-button:hover{opacity:.88;}
 		);
 	}
 
+	/**
+	 * Returns the stored login-throttle settings merged over the defaults.
+	 */
 	public static function throttle_settings() {
 		return wp_parse_args( get_option( 'is_login_throttle_settings', array() ), self::default_throttle_settings() );
 	}
 
+	/**
+	 * Pure: the default shape of a per-IP failed-attempt record.
+	 */
 	public static function default_attempt_record() {
 		return array(
 			'failures'     => array(),
@@ -397,6 +467,12 @@ a.is-404-button:hover{opacity:.88;}
 		);
 	}
 
+	/**
+	 * Pure: is this record currently within its lockout period?
+	 *
+	 * @param array $record Attempt record, shaped like default_attempt_record().
+	 * @param int   $now    Current timestamp.
+	 */
 	public static function is_locked_out( array $record, $now ) {
 		return ! empty( $record['locked_until'] ) && $record['locked_until'] > $now;
 	}
@@ -406,6 +482,11 @@ a.is-404-button:hover{opacity:.88;}
 	 * identical to IS_Guard::failure_state()'s circuit breaker, applied
 	 * to login attempts instead of module faults. No WordPress calls.
 	 *
+	 * @param array $record          Attempt record, shaped like default_attempt_record().
+	 * @param int   $now             Current timestamp.
+	 * @param int   $threshold       Number of failures within the window before locking out.
+	 * @param int   $window_seconds  Rolling window length in seconds.
+	 * @param int   $lockout_seconds Lockout duration in seconds once triggered.
 	 * @return array{record: array, just_locked: bool}
 	 */
 	public static function record_failure( array $record, $now, $threshold, $window_seconds, $lockout_seconds ) {
@@ -451,6 +532,12 @@ a.is-404-button:hover{opacity:.88;}
 		return array( 'usernames' => array() );
 	}
 
+	/**
+	 * Pure: adds $username to the record's rolling set of distinct usernames, if new.
+	 *
+	 * @param array  $record   Username-tracking record, shaped like default_username_record().
+	 * @param string $username Username that was attempted.
+	 */
 	public static function record_username_attempt( array $record, $username ) {
 		$usernames = isset( $record['usernames'] ) ? (array) $record['usernames'] : array();
 		$username  = trim( (string) $username );
@@ -465,29 +552,61 @@ a.is-404-button:hover{opacity:.88;}
 	 * tried from one IP, unlike a simple brute force against one
 	 * account (which the ordinary failure-count lockout above already
 	 * handles) -- this is the complementary signal.
+	 *
+	 * @param array $record    Username-tracking record, shaped like default_username_record().
+	 * @param int   $threshold Number of distinct usernames before flagging credential stuffing.
 	 */
 	public static function is_credential_stuffing( array $record, $threshold ) {
 		$usernames = isset( $record['usernames'] ) ? (array) $record['usernames'] : array();
 		return count( $usernames ) >= max( 2, (int) $threshold );
 	}
 
+	/**
+	 * Builds the transient key for an IP's failed-attempt record.
+	 *
+	 * @param string $ip Client IP address.
+	 */
 	private static function transient_key( $ip ) {
 		return 'is_login_attempts_' . md5( $ip );
 	}
 
+	/**
+	 * Builds the transient key for an IP's distinct-username tracker.
+	 *
+	 * @param string $ip Client IP address.
+	 */
 	private static function username_transient_key( $ip ) {
 		return 'is_login_usernames_' . md5( $ip );
 	}
 
+	/**
+	 * Reads an IP's failed-attempt record from its transient, defaulting
+	 * to an empty record if none is stored.
+	 *
+	 * @param string $ip Client IP address.
+	 */
 	private static function attempt_record( $ip ) {
 		$stored = get_transient( self::transient_key( $ip ) );
 		return is_array( $stored ) ? wp_parse_args( $stored, self::default_attempt_record() ) : self::default_attempt_record();
 	}
 
+	/**
+	 * Stores an IP's failed-attempt record back into its transient.
+	 *
+	 * @param string $ip          Client IP address.
+	 * @param array  $record      Attempt record to persist.
+	 * @param int    $ttl_seconds Transient lifetime in seconds.
+	 */
 	private static function persist_attempt_record( $ip, array $record, $ttl_seconds ) {
 		set_transient( self::transient_key( $ip ), $record, max( MINUTE_IN_SECONDS, $ttl_seconds ) );
 	}
 
+	/**
+	 * Action callback for 'wp_login_failed': records the failure, escalates
+	 * to a lockout and/or credential-stuffing alert when thresholds are hit.
+	 *
+	 * @param string $username Username that was attempted.
+	 */
 	public function on_login_failed( $username ) {
 		IS_Guard::run(
 			'login_rate_limit',
@@ -572,6 +691,10 @@ a.is-404-button:hover{opacity:.88;}
 		);
 	}
 
+	/**
+	 * Action callback for 'wp_login': clears the client IP's failed-attempt
+	 * record on a successful login.
+	 */
 	public function on_login_success() {
 		IS_Guard::run(
 			'login_rate_limit',
@@ -584,6 +707,12 @@ a.is-404-button:hover{opacity:.88;}
 		);
 	}
 
+	/**
+	 * Filter callback for 'authenticate': rejects the login attempt with a
+	 * WP_Error if the client IP is currently locked out.
+	 *
+	 * @param WP_User|WP_Error|null $user Value passed through the authenticate filter chain.
+	 */
 	public function check_lockout( $user ) {
 		return IS_Guard::run(
 			'login_rate_limit',

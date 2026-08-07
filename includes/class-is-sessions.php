@@ -1,4 +1,10 @@
 <?php
+/**
+ * Session visibility, revocation, and new-IP/impossible-travel alerting.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -27,12 +33,20 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Sessions {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Sessions|null
+	 */
 	private static $instance = null;
 
 	const KNOWN_IPS_META_KEY  = '_is_known_login_ips';
 	const LAST_LOGIN_META_KEY = '_is_last_login';
 	const MAX_KNOWN_IPS       = 20;
 
+	/**
+	 * Returns the singleton instance, creating and hooking it on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -41,6 +55,9 @@ class IS_Sessions {
 		return self::$instance;
 	}
 
+	/**
+	 * Default settings for this module.
+	 */
 	public static function default_settings() {
 		return array(
 			'alert_on_new_ip'                  => 1,
@@ -49,10 +66,16 @@ class IS_Sessions {
 		);
 	}
 
+	/**
+	 * Current settings, merged over the defaults.
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_session_settings', array() ), self::default_settings() );
 	}
 
+	/**
+	 * Registers this module's WordPress hooks.
+	 */
 	private function hooks() {
 		add_action( 'wp_login', array( $this, 'maybe_alert_new_ip' ), 10, 2 );
 		add_action( 'admin_post_is_revoke_session', array( $this, 'handle_revoke_session' ) );
@@ -70,6 +93,9 @@ class IS_Sessions {
 	 * empty -- that's an account's very first-ever recorded login (or
 	 * one that predates this feature), where everything would trivially
 	 * look "new" and the alert would just be noise.
+	 *
+	 * @param string $ip        IP address to check.
+	 * @param array  $known_ips Previously seen IPs for this account.
 	 */
 	public static function is_new_ip( $ip, array $known_ips ) {
 		if ( '' === $ip || empty( $known_ips ) ) {
@@ -78,7 +104,13 @@ class IS_Sessions {
 		return ! in_array( $ip, $known_ips, true );
 	}
 
-	/** Pure: appends $ip to $known_ips, de-duplicated, capped to the $max most recent. */
+	/**
+	 * Pure: appends $ip to $known_ips, de-duplicated, capped to the $max most recent.
+	 *
+	 * @param array  $known_ips Previously seen IPs for this account.
+	 * @param string $ip        IP address to append.
+	 * @param int    $max       Maximum number of IPs to retain.
+	 */
 	public static function record_known_ip( array $known_ips, $ip, $max = self::MAX_KNOWN_IPS ) {
 		if ( '' === $ip ) {
 			return array_values( $known_ips );
@@ -97,6 +129,8 @@ class IS_Sessions {
 	 * heuristic deliberately doesn't attempt an IPv6 equivalent (prefix
 	 * boundaries there don't map cleanly to "roughly the same network"
 	 * the way a /16 does for IPv4).
+	 *
+	 * @param string $ip IP address to inspect.
 	 */
 	public static function ipv4_slash16( $ip ) {
 		if ( ! preg_match( '/^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/', (string) $ip, $m ) ) {
@@ -116,7 +150,10 @@ class IS_Sessions {
 	 * genuine previous login on record, or across two logins outside the
 	 * window, or when either address isn't plain IPv4.
 	 *
-	 * @param array{ip?:string,time?:int} $previous
+	 * @param array{ip?:string,time?:int} $previous       The account's immediately preceding login record.
+	 * @param string                      $ip              IP address of the current login.
+	 * @param int                         $now             Current unix timestamp.
+	 * @param int                         $window_seconds  Maximum gap between logins still considered suspicious.
 	 */
 	public static function is_impossible_travel( array $previous, $ip, $now, $window_seconds ) {
 		if ( empty( $previous['ip'] ) || empty( $previous['time'] ) ) {
@@ -137,6 +174,8 @@ class IS_Sessions {
 	 * Pure: a short, human-readable device/browser label from a user
 	 * agent string -- good enough to tell "Chrome on Mac" apart from
 	 * "Safari on iPhone" in a session list; not a full UA parser.
+	 *
+	 * @param string $ua User agent string.
 	 */
 	public static function describe_user_agent( $ua ) {
 		$ua = (string) $ua;
@@ -177,6 +216,14 @@ class IS_Sessions {
 	// New-IP alert
 	// ===================================================================
 
+	/**
+	 * Records this login's IP/time and, on a new IP or an impossible-travel
+	 * pattern versus the account's previous login, fires an audit-log
+	 * entry, a notification, and (for impossible travel) a detection event.
+	 *
+	 * @param string  $user_login Username used to log in.
+	 * @param WP_User $user       The user who just logged in.
+	 */
 	public function maybe_alert_new_ip( $user_login, $user ) {
 		IS_Guard::run(
 			'session_security',
@@ -248,7 +295,13 @@ class IS_Sessions {
 	// Session listing + revocation (self)
 	// ===================================================================
 
-	/** @return array<string,array> token => session data (expiration, ip, ua, login), each with an added 'is_current' bool. */
+	/**
+	 * Every active session for a user, as core's WP_Session_Tokens sees
+	 * them, each entry augmented with an 'is_current' bool.
+	 *
+	 * @param int $user_id User ID.
+	 * @return array<string,array> Token => session data (expiration, ip, ua, login), each with an added 'is_current' bool.
+	 */
 	public static function sessions_for( $user_id ) {
 		$sessions = WP_Session_Tokens::get_instance( $user_id )->get_all();
 		$current  = ( get_current_user_id() === (int) $user_id ) ? wp_get_session_token() : '';
@@ -259,6 +312,9 @@ class IS_Sessions {
 		return $sessions;
 	}
 
+	/**
+	 * Revokes the current user's own session identified by the submitted token (self-service "log out this session").
+	 */
 	public function handle_revoke_session() {
 		if ( ! is_user_logged_in() ) {
 			wp_die( esc_html__( 'You must be logged in.', 'integrity-sentinel' ) );
@@ -273,6 +329,9 @@ class IS_Sessions {
 		exit;
 	}
 
+	/**
+	 * Revokes every session for the current user except the one making this request ("log out everywhere else").
+	 */
 	public function handle_revoke_other_sessions() {
 		if ( ! is_user_logged_in() ) {
 			wp_die( esc_html__( 'You must be logged in.', 'integrity-sentinel' ) );
@@ -288,6 +347,9 @@ class IS_Sessions {
 	// Force-logout another user (incident response)
 	// ===================================================================
 
+	/**
+	 * Force-revokes every session for another user's account, for admin incident response.
+	 */
 	public function handle_force_logout_user() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -309,7 +371,12 @@ class IS_Sessions {
 		exit;
 	}
 
-	/** Adds a "Log out all sessions" row action on the Users list for other accounts with an active session. */
+	/**
+	 * Adds a "Log out all sessions" row action on the Users list for other accounts with an active session.
+	 *
+	 * @param array   $actions     Existing row actions for this user row.
+	 * @param WP_User $user_object The user this row is for.
+	 */
 	public function add_force_logout_row_action( array $actions, $user_object ) {
 		return IS_Guard::run(
 			'session_security',

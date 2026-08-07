@@ -1,4 +1,12 @@
 <?php
+/**
+ * Rejects executable file types at upload time, across the media uploader,
+ * plugin/theme install-by-upload, and any importer that routes through
+ * wp_handle_upload().
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -19,6 +27,11 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Upload_Guard {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var self|null
+	 */
 	private static $instance = null;
 
 	const DANGEROUS_EXTENSIONS = array(
@@ -45,6 +58,9 @@ class IS_Upload_Guard {
 		'jspx',
 	);
 
+	/**
+	 * Returns the singleton instance, creating and hooking it up on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -53,6 +69,9 @@ class IS_Upload_Guard {
 		return self::$instance;
 	}
 
+	/**
+	 * Wires the upload/sideload prefilters that block dangerous uploads.
+	 */
 	private function hooks() {
 		add_filter( 'wp_handle_upload_prefilter', array( $this, 'block_dangerous_uploads' ) );
 		add_filter( 'wp_handle_sideload_prefilter', array( $this, 'block_dangerous_uploads' ) );
@@ -61,10 +80,12 @@ class IS_Upload_Guard {
 	/**
 	 * Pure: true if any dot-separated segment of the filename (after the
 	 * base name) is a known executable extension.
+	 *
+	 * @param string $filename Filename to check.
 	 */
 	public static function filename_has_dangerous_extension( $filename ) {
 		$parts = explode( '.', strtolower( (string) $filename ) );
-		array_shift( $parts ); // the first segment is the base name, not an extension
+		array_shift( $parts ); // The first segment is the base name, not an extension.
 		foreach ( $parts as $ext ) {
 			if ( in_array( $ext, self::DANGEROUS_EXTENSIONS, true ) ) {
 				return true;
@@ -73,6 +94,12 @@ class IS_Upload_Guard {
 		return false;
 	}
 
+	/**
+	 * Filter callback for wp_handle_upload_prefilter/wp_handle_sideload_prefilter:
+	 * blocks the upload and logs it if the filename has a dangerous extension.
+	 *
+	 * @param array $file Upload file array, as passed by wp_handle_upload().
+	 */
 	public function block_dangerous_uploads( $file ) {
 		return IS_Guard::run(
 			'upload_guard',

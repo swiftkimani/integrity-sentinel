@@ -1,4 +1,11 @@
 <?php
+/**
+ * Watches plugin/theme installs and updates, verifying updated plugin files
+ * against official checksums and alerting on new installs or tampering.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -17,8 +24,16 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Update_Monitor {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var self|null
+	 */
 	private static $instance = null;
 
+	/**
+	 * Returns the singleton instance, creating and hooking it up on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -28,6 +43,10 @@ class IS_Update_Monitor {
 	}
 
 	/**
+	 * Fires after any upgrader run completes; logs and alerts on new
+	 * plugin/theme installs, and hands plugin updates off for checksum
+	 * verification.
+	 *
 	 * @param WP_Upgrader $upgrader   Unused.
 	 * @param array       $hook_extra Upgrader context.
 	 */
@@ -61,6 +80,13 @@ class IS_Update_Monitor {
 		}
 	}
 
+	/**
+	 * Verifies a just-updated WordPress.org plugin's files on disk against
+	 * the published checksums for the version it was updated to, logging
+	 * the result and alerting if any files don't match.
+	 *
+	 * @param string $plugin_file Plugin file path relative to the plugins directory.
+	 */
 	private function verify_updated_plugin( $plugin_file ) {
 		$slug = dirname( $plugin_file );
 		if ( '.' === $slug ) {
@@ -81,7 +107,7 @@ class IS_Update_Monitor {
 
 		$checksums = ( new IS_Plugin_Checksums() )->get_checksums( $slug, $version );
 		if ( is_wp_error( $checksums ) ) {
-			return; // not a WordPress.org plugin (or no checksums for this version) -- nothing to verify against
+			return; // not a WordPress.org plugin (or no checksums for this version) -- nothing to verify against.
 		}
 
 		$root       = trailingslashit( WP_PLUGIN_DIR ) . $slug . '/';

@@ -1,4 +1,10 @@
 <?php
+/**
+ * CycloneDX-lite software inventory generation and diffing.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -28,8 +34,8 @@ class IS_SBOM {
 	 * Pure: diffs two component lists (as produced by generate()) by
 	 * name, reporting what was added, removed, or changed version.
 	 *
-	 * @param array<array{name:string,version:string}> $previous
-	 * @param array<array{name:string,version:string}> $current
+	 * @param array<array{name:string,version:string}> $previous The prior snapshot's components.
+	 * @param array<array{name:string,version:string}> $current  The new snapshot's components.
 	 * @return array{added:string[],removed:string[],changed:array<array{name:string,from:string,to:string}>}
 	 */
 	public static function diff( array $previous, array $current ) {
@@ -74,6 +80,11 @@ class IS_SBOM {
 		);
 	}
 
+	/**
+	 * Pure: whether a diff() result contains any change at all.
+	 *
+	 * @param array $diff A diff() result.
+	 */
 	public static function has_diff( array $diff ) {
 		return ! empty( $diff['added'] ) || ! empty( $diff['removed'] ) || ! empty( $diff['changed'] );
 	}
@@ -82,7 +93,11 @@ class IS_SBOM {
 	// WP-dependent glue
 	// -----------------------------------------------------------------
 
-	/** @return array<array{type:string,name:string,version:string,path:string}> */
+	/**
+	 * Builds the current inventory: core, every installed plugin, and the active theme.
+	 *
+	 * @return array<array{type:string,name:string,version:string,path:string}>
+	 */
 	public static function generate() {
 		if ( ! function_exists( 'get_plugins' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/plugin.php';
@@ -118,7 +133,11 @@ class IS_SBOM {
 		return $components;
 	}
 
-	/** Builds a CycloneDX-lite JSON document from generate()'s component list. */
+	/**
+	 * Builds a CycloneDX-lite JSON document from generate()'s component list.
+	 *
+	 * @param array $components Component list, as returned by generate().
+	 */
 	public static function to_document( array $components ) {
 		return array(
 			'bomFormat'   => 'CycloneDX-lite',

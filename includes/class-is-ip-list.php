@@ -1,4 +1,10 @@
 <?php
+/**
+ * Editable IP allow/deny lists and temporary bans, CIDR-aware (IPv4 and IPv6).
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -21,9 +27,23 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_IP_List {
 
-	private static $instance        = null;
+	/**
+	 * Singleton instance.
+	 *
+	 * @var self|null
+	 */
+	private static $instance = null;
+
+	/**
+	 * Per-request cache for client_ip(), so resolve_client_ip() only runs once.
+	 *
+	 * @var string|null
+	 */
 	private static $client_ip_cache = null;
 
+	/**
+	 * Returns the singleton instance, creating and hooking it up on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -32,6 +52,9 @@ class IS_IP_List {
 		return self::$instance;
 	}
 
+	/**
+	 * Default settings, used to fill in anything missing from the stored option.
+	 */
 	public static function default_settings() {
 		return array(
 			'whitelist'            => '',
@@ -41,10 +64,16 @@ class IS_IP_List {
 		);
 	}
 
+	/**
+	 * Stored settings, merged over default_settings().
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_ip_list_settings', array() ), self::default_settings() );
 	}
 
+	/**
+	 * Registers the WordPress hook that enforces the lists on every request.
+	 */
 	private function hooks() {
 		// 'init', not 'plugins_loaded': this class is instantiated from
 		// is_init(), which is itself a 'plugins_loaded' callback --
@@ -57,6 +86,10 @@ class IS_IP_List {
 		add_action( 'init', array( $this, 'enforce' ), 1 );
 	}
 
+	/**
+	 * Denies the request outright if the client IP is blacklisted or
+	 * temp-banned, unless it's whitelisted (which always wins).
+	 */
 	public function enforce() {
 		IS_Guard::run(
 			'ip_list',
@@ -96,6 +129,7 @@ class IS_IP_List {
 	 * Parses a textarea's worth of list entries: one IP or CIDR per
 	 * line, blank lines ignored, "# ..." trailing comments stripped.
 	 *
+	 * @param string $text Raw textarea contents.
 	 * @return string[]
 	 */
 	public static function parse_list_text( $text ) {
@@ -113,6 +147,9 @@ class IS_IP_List {
 	 * Whether $ip falls inside a single IP or CIDR entry. Handles plain
 	 * IPv4/IPv6 addresses and CIDR ranges of either family; a family
 	 * mismatch (e.g. an IPv4 $ip against an IPv6 CIDR) never matches.
+	 *
+	 * @param string $ip    IP address to test.
+	 * @param string $entry Single list entry: a plain IP or a CIDR range.
 	 */
 	public static function ip_in_entry( $ip, $entry ) {
 		$ip_bin = @inet_pton( $ip ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- invalid input is expected and handled below
@@ -130,7 +167,7 @@ class IS_IP_List {
 		$prefix                  = (int) $prefix;
 
 		if ( false === $subnet_bin || strlen( $subnet_bin ) !== strlen( $ip_bin ) ) {
-			return false; // malformed entry, or address-family mismatch
+			return false; // malformed entry, or address-family mismatch.
 		}
 
 		$max_prefix = strlen( $subnet_bin ) * 8;
@@ -153,6 +190,8 @@ class IS_IP_List {
 	}
 
 	/**
+	 * Whether $ip matches any entry in a parsed list.
+	 *
 	 * @param string   $ip      Client IP.
 	 * @param string[] $entries Parsed list entries.
 	 */
@@ -175,6 +214,9 @@ class IS_IP_List {
 	 * range -- otherwise REMOTE_ADDR is always the answer, so a request
 	 * that didn't actually come through the trusted proxy can't spoof
 	 * its way past this with a forged header.
+	 *
+	 * @param array $server   A $_SERVER-like array.
+	 * @param array $settings Settings shaped like default_settings().
 	 */
 	public static function resolve_client_ip( array $server, array $settings ) {
 		$remote_addr = isset( $server['REMOTE_ADDR'] ) ? trim( (string) $server['REMOTE_ADDR'] ) : '';
@@ -213,7 +255,12 @@ class IS_IP_List {
 		);
 	}
 
-	/** Pure: is a ban record currently in effect? */
+	/**
+	 * Pure: is a ban record currently in effect?
+	 *
+	 * @param array $record Ban record shaped like default_ban_record().
+	 * @param int   $now    Current unix timestamp.
+	 */
 	public static function is_ban_active( array $record, $now ) {
 		return ! empty( $record['banned_until'] ) && $record['banned_until'] > $now;
 	}
@@ -222,14 +269,21 @@ class IS_IP_List {
 	// WP-dependent glue
 	// -----------------------------------------------------------------
 
+	/**
+	 * Transient key a given IP's temp-ban record is stored under.
+	 *
+	 * @param string $ip Client IP.
+	 */
 	private static function ban_transient_key( $ip ) {
 		return 'is_ip_temp_ban_' . md5( (string) $ip );
 	}
 
 	/**
-	 * @param string $ip
+	 * Temp-bans an IP for $duration_seconds.
+	 *
+	 * @param string $ip               IP to ban.
 	 * @param string $reason           Short machine-readable reason, stored for the admin's benefit -- never shown to the banned visitor.
-	 * @param int    $duration_seconds
+	 * @param int    $duration_seconds How long the ban lasts, in seconds.
 	 */
 	public static function temp_ban( $ip, $reason, $duration_seconds ) {
 		$duration_seconds = max( MINUTE_IN_SECONDS, (int) $duration_seconds );
@@ -241,6 +295,11 @@ class IS_IP_List {
 		return $record;
 	}
 
+	/**
+	 * Whether an IP is currently temp-banned (defaults to the current client IP).
+	 *
+	 * @param string|null $ip IP to check, or null for the current client IP.
+	 */
 	public static function is_temp_banned( $ip = null ) {
 		$ip = null === $ip ? self::client_ip() : $ip;
 		if ( '' === $ip ) {
@@ -251,6 +310,9 @@ class IS_IP_List {
 		return self::is_ban_active( $record, time() );
 	}
 
+	/**
+	 * The current request's client IP, resolved once per request and cached.
+	 */
 	public static function client_ip() {
 		if ( null === self::$client_ip_cache ) {
 			self::$client_ip_cache = self::resolve_client_ip( $_SERVER, self::settings() ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- resolve_client_ip() validates every value it reads via inet_pton()
@@ -258,11 +320,21 @@ class IS_IP_List {
 		return self::$client_ip_cache;
 	}
 
+	/**
+	 * Whether an IP is on the whitelist (defaults to the current client IP).
+	 *
+	 * @param string|null $ip IP to check, or null for the current client IP.
+	 */
 	public static function is_whitelisted( $ip = null ) {
 		$ip = null === $ip ? self::client_ip() : $ip;
 		return self::ip_matches_list( $ip, self::parse_list_text( self::settings()['whitelist'] ) );
 	}
 
+	/**
+	 * Whether an IP is on the blacklist (defaults to the current client IP).
+	 *
+	 * @param string|null $ip IP to check, or null for the current client IP.
+	 */
 	public static function is_blacklisted( $ip = null ) {
 		$ip = null === $ip ? self::client_ip() : $ip;
 		return self::ip_matches_list( $ip, self::parse_list_text( self::settings()['blacklist'] ) );

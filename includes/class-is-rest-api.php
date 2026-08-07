@@ -1,4 +1,11 @@
 <?php
+/**
+ * REST API hardening against user enumeration and, optionally, all
+ * unauthenticated access.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -29,8 +36,19 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Rest_API {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Rest_API|null
+	 */
 	private static $instance = null;
 
+	/**
+	 * Gets (and lazily creates) the singleton instance, wiring up hooks
+	 * the first time it is created.
+	 *
+	 * @return IS_Rest_API
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -41,6 +59,11 @@ class IS_Rest_API {
 
 	const RATE_LIMIT_WINDOW = 5 * MINUTE_IN_SECONDS;
 
+	/**
+	 * Default settings for this module.
+	 *
+	 * @return array
+	 */
 	public static function default_settings() {
 		return array(
 			'block_user_enumeration'   => 1,
@@ -53,10 +76,18 @@ class IS_Rest_API {
 		);
 	}
 
+	/**
+	 * Current settings, merged with the defaults.
+	 *
+	 * @return array
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_rest_api_settings', array() ), self::default_settings() );
 	}
 
+	/**
+	 * Registers the REST-dispatch guard and the author-enumeration check.
+	 */
 	private function hooks() {
 		add_filter( 'rest_pre_dispatch', array( $this, 'guard_request' ), 10, 3 );
 		add_action( 'template_redirect', array( $this, 'block_author_query_enumeration' ) );
@@ -66,6 +97,13 @@ class IS_Rest_API {
 	// Pure route-matching logic
 	// -----------------------------------------------------------------
 
+	/**
+	 * Pure: whether $route is the core users collection or a single-user
+	 * lookup on it.
+	 *
+	 * @param string $route REST route being requested.
+	 * @return bool
+	 */
 	public static function is_user_enumeration_route( $route ) {
 		return (bool) preg_match( '#^/wp/v2/users(?:/\d+)?/?$#', (string) $route );
 	}
@@ -76,7 +114,9 @@ class IS_Rest_API {
 	 * always allowed (it enforces its own auth per-route), plus any
 	 * admin-configured prefix.
 	 *
-	 * @param string[] $allowed_prefixes
+	 * @param string   $route            REST route being requested.
+	 * @param string[] $allowed_prefixes Admin-configured allowed route prefixes.
+	 * @return bool
 	 */
 	public static function route_is_allowlisted( $route, array $allowed_prefixes ) {
 		$route = ltrim( (string) $route, '/' );
@@ -92,6 +132,13 @@ class IS_Rest_API {
 		return false;
 	}
 
+	/**
+	 * Splits an admin-entered, newline-separated list of route prefixes
+	 * into a clean array (trimmed, blank lines dropped).
+	 *
+	 * @param string $text Raw newline-separated route-prefix list.
+	 * @return string[]
+	 */
 	public static function parse_route_list( $text ) {
 		return array_values( array_filter( array_map( 'trim', preg_split( '/\r\n|\r|\n/', (string) $text ) ) ) );
 	}
@@ -103,6 +150,9 @@ class IS_Rest_API {
 	 * without needing to understand every possible custom post type or
 	 * namespace; the core collections are the ones enumeration actually
 	 * targets in practice (usernames, unpublished posts, private pages).
+	 *
+	 * @param string $route REST route being requested.
+	 * @return array{type: string, id: int}|null
 	 */
 	public static function numeric_id_route_match( $route ) {
 		if ( preg_match( '#^/wp/v2/(posts|pages|users|comments|media)/(\d+)/?$#', (string) $route, $m ) ) {
@@ -118,6 +168,16 @@ class IS_Rest_API {
 	// WP-dependent glue
 	// -----------------------------------------------------------------
 
+	/**
+	 * Filters 'rest_pre_dispatch' to apply rate limiting, user-enumeration
+	 * blocking, full unauthenticated-access restriction, and enumeration
+	 * detection before the request reaches its actual handler.
+	 *
+	 * @param mixed           $result  Response to replace the requested version with, usually null.
+	 * @param WP_REST_Server  $server  Server instance.
+	 * @param WP_REST_Request $request Request used to generate the response.
+	 * @return mixed The original $result, or a WP_Error to short-circuit the request.
+	 */
 	public function guard_request( $result, $server, $request ) {
 		return IS_Guard::run(
 			'rest_api',

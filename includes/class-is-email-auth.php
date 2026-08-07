@@ -1,4 +1,10 @@
 <?php
+/**
+ * Read-only SPF/DMARC/DKIM presence checks for the site's sending domain, via plain DNS TXT lookups.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -21,7 +27,11 @@ class IS_Email_Auth {
 	// Pure logic
 	// -----------------------------------------------------------------
 
-	/** Pure: does a list of TXT record value strings contain a valid SPF record? */
+	/**
+	 * Pure: does a list of TXT record value strings contain a valid SPF record?
+	 *
+	 * @param string[] $txt_values TXT record value strings for a hostname.
+	 */
 	public static function has_spf( array $txt_values ) {
 		foreach ( $txt_values as $value ) {
 			if ( 0 === stripos( trim( (string) $value ), 'v=spf1' ) ) {
@@ -31,7 +41,11 @@ class IS_Email_Auth {
 		return false;
 	}
 
-	/** Pure: does a list of TXT record value strings contain a valid DMARC record? */
+	/**
+	 * Pure: does a list of TXT record value strings contain a valid DMARC record?
+	 *
+	 * @param string[] $txt_values TXT record value strings for a hostname.
+	 */
 	public static function has_dmarc( array $txt_values ) {
 		foreach ( $txt_values as $value ) {
 			if ( 0 === stripos( trim( (string) $value ), 'v=DMARC1' ) ) {
@@ -41,7 +55,11 @@ class IS_Email_Auth {
 		return false;
 	}
 
-	/** Pure: extracts the p= enforcement level from a DMARC record string; '' if absent/malformed. */
+	/**
+	 * Pure: extracts the p= enforcement level from a DMARC record string; '' if absent/malformed.
+	 *
+	 * @param string $dmarc_record Single DMARC TXT record value string.
+	 */
 	public static function dmarc_policy( $dmarc_record ) {
 		if ( preg_match( '/;\s*p\s*=\s*(none|quarantine|reject)/i', ';' . (string) $dmarc_record, $m ) ) {
 			return strtolower( $m[1] );
@@ -49,7 +67,11 @@ class IS_Email_Auth {
 		return '';
 	}
 
-	/** Pure: does a list of TXT record value strings look like a DKIM public-key record? */
+	/**
+	 * Pure: does a list of TXT record value strings look like a DKIM public-key record?
+	 *
+	 * @param string[] $txt_values TXT record value strings for a hostname.
+	 */
 	public static function has_dkim( array $txt_values ) {
 		foreach ( $txt_values as $value ) {
 			$value = (string) $value;
@@ -64,7 +86,12 @@ class IS_Email_Auth {
 	// WP/PHP-dependent glue
 	// -----------------------------------------------------------------
 
-	/** @return string[] every TXT record's text value for $hostname. */
+	/**
+	 * Looks up TXT records for a hostname.
+	 *
+	 * @param string $hostname Hostname to query.
+	 * @return string[] every TXT record's text value for $hostname.
+	 */
 	private static function txt_values_for( $hostname ) {
 		$records = @dns_get_record( $hostname, DNS_TXT ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- a non-existent hostname is an expected outcome, not a code error
 		if ( ! is_array( $records ) ) {
@@ -82,6 +109,9 @@ class IS_Email_Auth {
 	}
 
 	/**
+	 * Runs the SPF, DMARC, and DKIM presence checks for a domain.
+	 *
+	 * @param string $domain Domain to check.
 	 * @return array{domain:string,spf:bool,dmarc:bool,dmarc_policy:string,dkim:bool,dkim_selector:string}
 	 */
 	public static function check_domain( $domain ) {

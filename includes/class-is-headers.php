@@ -1,4 +1,10 @@
 <?php
+/**
+ * HTTP response hardening: security headers, version disclosure, XML-RPC, and feeds.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -17,8 +23,16 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Headers {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Headers|null
+	 */
 	private static $instance = null;
 
+	/**
+	 * Returns the singleton instance, creating and hooking it on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -27,6 +41,9 @@ class IS_Headers {
 		return self::$instance;
 	}
 
+	/**
+	 * Default settings for this module.
+	 */
 	public static function default_settings() {
 		return array(
 			'security_headers'        => 1,
@@ -40,10 +57,16 @@ class IS_Headers {
 		);
 	}
 
+	/**
+	 * Current settings, merged over the defaults.
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_hardening_settings', array() ), self::default_settings() );
 	}
 
+	/**
+	 * Registers this module's WordPress hooks.
+	 */
 	private function hooks() {
 		add_action( 'send_headers', array( $this, 'send_security_headers' ) );
 		add_action( 'login_init', array( $this, 'send_security_headers' ) );
@@ -70,6 +93,8 @@ class IS_Headers {
 	/**
 	 * Pure: the header name => value pairs to send for a given settings
 	 * array. No WordPress calls -- fully unit-testable.
+	 *
+	 * @param array $settings Settings array, shaped like default_settings().
 	 */
 	public static function security_header_lines( array $settings ) {
 		$headers = array();
@@ -109,6 +134,8 @@ class IS_Headers {
 	 * nothing otherwise. With a full policy set, frame-ancestors is
 	 * folded into it (rather than sent as a second, separate directive)
 	 * unless the admin's own policy already specifies one.
+	 *
+	 * @param array $settings Settings array, shaped like default_settings().
 	 */
 	public static function build_csp( array $settings ) {
 		$policy = trim( (string) ( $settings['content_security_policy'] ?? '' ) );
@@ -137,6 +164,7 @@ class IS_Headers {
 	 * from a plugin risks locking out a site not fully migrated to it
 	 * yet), scoped to exactly what these settings control.
 	 *
+	 * @param array $settings Settings array, shaped like default_settings().
 	 * @return array{score:int,max:int,items:array<array{key:string,label:string,passed:bool}>}
 	 */
 	public static function audit_score( array $settings ) {
@@ -209,6 +237,9 @@ class IS_Headers {
 	// Hide WordPress version
 	// -----------------------------------------------------------------
 
+	/**
+	 * Stops core from printing the wp_generator meta tag, when hide_wp_version is enabled.
+	 */
 	public function remove_version_generator() {
 		IS_Guard::run(
 			'hide_wp_version',
@@ -220,11 +251,21 @@ class IS_Headers {
 		);
 	}
 
-	/** Pure: the_generator filter callback logic. */
+	/**
+	 * Pure: the_generator filter callback logic.
+	 *
+	 * @param string $generator The generator tag markup core would output.
+	 * @param array  $settings  Settings array, shaped like default_settings().
+	 */
 	public static function generator_value( $generator, array $settings ) {
 		return empty( $settings['hide_wp_version'] ) ? $generator : '';
 	}
 
+	/**
+	 * Blanks the `the_generator` output when hide_wp_version is enabled.
+	 *
+	 * @param string $generator The generator tag markup core would output.
+	 */
 	public function filter_the_generator( $generator ) {
 		return IS_Guard::run(
 			'hide_wp_version',
@@ -239,6 +280,8 @@ class IS_Headers {
 	 * Pure: strips a `ver` query argument from an enqueued asset URL
 	 * (e.g. style.css?ver=6.7 -> style.css) without depending on any
 	 * WordPress URL helper, so this is unit-testable on its own.
+	 *
+	 * @param string $src Enqueued asset URL.
 	 */
 	public static function strip_version_query_string( $src ) {
 		if ( ! is_string( $src ) || false === strpos( $src, 'ver=' ) ) {
@@ -266,6 +309,11 @@ class IS_Headers {
 		return $base . $rebuilt . $frag;
 	}
 
+	/**
+	 * Strips the `ver` cache-busting query argument from enqueued asset URLs, when hide_wp_version is enabled.
+	 *
+	 * @param string $src Enqueued asset URL.
+	 */
 	public function filter_asset_version( $src ) {
 		return IS_Guard::run(
 			'hide_wp_version',
@@ -316,6 +364,8 @@ class IS_Headers {
 	 * which needs no server-config changes and works identically on
 	 * every host, unlike a hard 403/404 that would need .htaccess/nginx
 	 * rules this plugin can't guarantee are applied.
+	 *
+	 * @param bool $enabled Whether XML-RPC is currently enabled.
 	 */
 	public function filter_xmlrpc_enabled( $enabled ) {
 		return IS_Guard::run(
@@ -327,6 +377,11 @@ class IS_Headers {
 		);
 	}
 
+	/**
+	 * Removes the X-Pingback response header when disable_xmlrpc is enabled.
+	 *
+	 * @param array $headers Response headers, keyed by header name.
+	 */
 	public function filter_pingback_header( $headers ) {
 		return IS_Guard::run(
 			'disable_xmlrpc',
@@ -340,6 +395,9 @@ class IS_Headers {
 		);
 	}
 
+	/**
+	 * Stops core from printing the RSD (Really Simple Discovery) link when disable_xmlrpc is enabled.
+	 */
 	public function maybe_remove_rsd_link() {
 		IS_Guard::run(
 			'disable_xmlrpc',
@@ -355,6 +413,9 @@ class IS_Headers {
 	// RSS/Atom feeds
 	// -----------------------------------------------------------------
 
+	/**
+	 * Blocks RSS/Atom feed requests with a 403 when disable_feeds is enabled.
+	 */
 	public function maybe_block_feed() {
 		IS_Guard::run(
 			'disable_feeds',

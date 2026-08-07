@@ -1,4 +1,11 @@
 <?php
+/**
+ * Fetches and caches WordPress.org's official core checksums, and flags
+ * local paths that are expected to vary from them.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -19,6 +26,11 @@ class IS_Core_Checksums {
 	const CACHE_TTL = 12 * HOUR_IN_SECONDS;
 
 	/**
+	 * Retrieves the checksums for a given WordPress version/locale, from cache
+	 * when available or by requesting them from the WordPress.org API otherwise.
+	 *
+	 * @param string $version Optional. WordPress version to check. Defaults to the running version.
+	 * @param string $locale  Optional. Locale to check. Defaults to the site's locale.
 	 * @return array|WP_Error Map of relative-path => md5, or WP_Error on failure.
 	 */
 	public function get_checksums( $version = null, $locale = null ) {
@@ -72,12 +84,19 @@ class IS_Core_Checksums {
 	public function expected_local_variance() {
 		return array(
 			'wp-config.php',
-			'wp-content/',       // everything under wp-content is plugins/themes/uploads, verified separately
+			'wp-content/',       // everything under wp-content is plugins/themes/uploads, verified separately.
 			'.htaccess',
-			'wp-config-sample.php', // some hosts patch this
+			'wp-config-sample.php', // some hosts patch this.
 		);
 	}
 
+	/**
+	 * Determines whether a relative path is expected to differ from the
+	 * published checksums, based on the prefixes returned by expected_local_variance().
+	 *
+	 * @param string $relative_path Relative path to check, as returned by the checksums API.
+	 * @return bool True if the path is expected to vary and shouldn't be reported as tampering.
+	 */
 	public function is_expected_variance( $relative_path ) {
 		foreach ( $this->expected_local_variance() as $prefix ) {
 			if ( 0 === strpos( $relative_path, $prefix ) ) {

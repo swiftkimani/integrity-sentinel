@@ -1,4 +1,10 @@
 <?php
+/**
+ * Disguises wp-content/wp-includes URLs and paths behind an admin-chosen alias.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -30,11 +36,19 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Asset_Cloak {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Asset_Cloak|null
+	 */
 	private static $instance = null;
 
 	const BLOCK_BEGIN = '# BEGIN Integrity Sentinel Asset Cloak';
 	const BLOCK_END   = '# END Integrity Sentinel Asset Cloak';
 
+	/**
+	 * Returns the singleton instance, creating and hooking it on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -43,6 +57,9 @@ class IS_Asset_Cloak {
 		return self::$instance;
 	}
 
+	/**
+	 * Default settings for this module.
+	 */
 	public static function default_settings() {
 		return array(
 			'enabled' => 0,
@@ -50,10 +67,16 @@ class IS_Asset_Cloak {
 		);
 	}
 
+	/**
+	 * Current settings, merged over the defaults.
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_asset_cloak_settings', array() ), self::default_settings() );
 	}
 
+	/**
+	 * Registers this module's WordPress hooks.
+	 */
 	private function hooks() {
 		add_filter( 'style_loader_src', array( $this, 'filter_url' ) );
 		add_filter( 'script_loader_src', array( $this, 'filter_url' ) );
@@ -72,6 +95,8 @@ class IS_Asset_Cloak {
 	 * Pure: normalizes a raw admin-entered alias down to safe characters
 	 * and rejects anything that would collide with a literal WordPress
 	 * core path.
+	 *
+	 * @param string $raw Raw admin-entered alias.
 	 */
 	public static function sanitize_alias( $raw ) {
 		$alias = strtolower( trim( (string) $raw ) );
@@ -92,6 +117,10 @@ class IS_Asset_Cloak {
 	 * host that doesn't match $site_host is left untouched) -- a
 	 * relative/protocol-relative/host-less URL is treated as same-host,
 	 * since that's what it resolves to in a browser.
+	 *
+	 * @param string $url       URL to rewrite.
+	 * @param string $alias     Configured alias to substitute for wp-content/wp-includes.
+	 * @param string $site_host The site's own host, for the same-host check.
 	 */
 	public static function rewrite_asset_url( $url, $alias, $site_host ) {
 		if ( '' === $alias || '' === $site_host || ! is_string( $url ) || '' === $url ) {
@@ -113,6 +142,9 @@ class IS_Asset_Cloak {
 	// WordPress glue
 	// ===================================================================
 
+	/**
+	 * The site's own host, memoized for the life of the request.
+	 */
 	private function site_host() {
 		static $host = null;
 		if ( null === $host ) {
@@ -122,6 +154,11 @@ class IS_Asset_Cloak {
 		return $host;
 	}
 
+	/**
+	 * Rewrites a wp-content/wp-includes URL to use the configured alias, when the feature is enabled.
+	 *
+	 * @param string $url URL to filter.
+	 */
 	public function filter_url( $url ) {
 		return IS_Guard::run(
 			'asset_cloak',
@@ -136,6 +173,11 @@ class IS_Asset_Cloak {
 		);
 	}
 
+	/**
+	 * Rewrites the uploads directory's url/baseurl to use the configured alias, when the feature is enabled.
+	 *
+	 * @param array $uploads Uploads directory info, as returned by wp_upload_dir().
+	 */
 	public function filter_upload_dir( $uploads ) {
 		return IS_Guard::run(
 			'asset_cloak',
@@ -159,10 +201,16 @@ class IS_Asset_Cloak {
 	// .htaccess (Apache) -- see class docblock for the ordering rationale
 	// ===================================================================
 
+	/**
+	 * Absolute path to the root .htaccess file.
+	 */
 	public static function htaccess_path() {
 		return trailingslashit( ABSPATH ) . '.htaccess';
 	}
 
+	/**
+	 * Whether our marker block is currently present in the root .htaccess.
+	 */
 	public static function block_active() {
 		$path = self::htaccess_path();
 		if ( ! file_exists( $path ) || ! is_readable( $path ) ) {
@@ -171,7 +219,11 @@ class IS_Asset_Cloak {
 		return false !== strpos( (string) file_get_contents( $path ), self::BLOCK_BEGIN ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 	}
 
-	/** Pure: strips our marker block from raw .htaccess content, leaving everything else untouched. */
+	/**
+	 * Pure: strips our marker block from raw .htaccess content, leaving everything else untouched.
+	 *
+	 * @param string $content Raw .htaccess content.
+	 */
 	public static function strip_block( $content ) {
 		$pattern = '/' . preg_quote( self::BLOCK_BEGIN, '/' ) . '.*?' . preg_quote( self::BLOCK_END, '/' ) . '\n?/s';
 		return (string) preg_replace( $pattern, '', (string) $content );
@@ -181,6 +233,8 @@ class IS_Asset_Cloak {
 	 * Pure: the Apache rules for a given alias. Wrapped in
 	 * <IfModule mod_rewrite.c> so this is a no-op (not a parse error) on
 	 * a server without mod_rewrite.
+	 *
+	 * @param string $alias Configured alias to substitute for wp-content/wp-includes.
 	 */
 	public static function block_rules( $alias ) {
 		return self::BLOCK_BEGIN . "\n"
@@ -196,7 +250,11 @@ class IS_Asset_Cloak {
 			. self::BLOCK_END . "\n";
 	}
 
-	/** Shown for manual configuration on non-Apache servers. */
+	/**
+	 * Shown for manual configuration on non-Apache servers.
+	 *
+	 * @param string $alias Configured alias to substitute for wp-content/wp-includes.
+	 */
 	public static function nginx_snippet( $alias ) {
 		$alias = '' !== $alias ? $alias : 'ALIAS';
 		return "location ~ ^/{$alias}-content/(.*)$ {\n\trewrite ^/{$alias}-content/(.*)$ /wp-content/\$1 last;\n}\nlocation ~ ^/{$alias}-includes/(.*)$ {\n\trewrite ^/{$alias}-includes/(.*)$ /wp-includes/\$1 last;\n}";
@@ -208,6 +266,7 @@ class IS_Asset_Cloak {
 	 * class docblock for why this must be a prepend, not the usual
 	 * append other .htaccess-writing features in this plugin use.
 	 *
+	 * @param string $alias Configured alias to substitute for wp-content/wp-includes.
 	 * @return true|WP_Error
 	 */
 	public static function apply_block( $alias ) {

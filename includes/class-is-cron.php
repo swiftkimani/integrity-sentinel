@@ -1,4 +1,11 @@
 <?php
+/**
+ * Cron scheduling: drives the periodic full scan and resumes any scan
+ * whose driver went away before it finished.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -22,12 +29,23 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Cron {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Cron|null
+	 */
 	private static $instance = null;
 	const STALL_THRESHOLD    = 15 * MINUTE_IN_SECONDS;
 
 	/** WP core provides hourly/twicedaily/daily; weekly is the only gap. */
 	const VALID_FREQUENCIES = array( 'hourly', 'twicedaily', 'daily', 'weekly' );
 
+	/**
+	 * Gets (and lazily creates) the singleton instance, wiring up hooks
+	 * the first time it is created.
+	 *
+	 * @return IS_Cron
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -36,6 +54,9 @@ class IS_Cron {
 		return self::$instance;
 	}
 
+	/**
+	 * Registers the cron actions and ensures our custom schedules exist.
+	 */
 	private function hooks() {
 		add_action( IS_CRON_DAILY_SCAN, array( $this, 'run_daily_scan' ) );
 		add_action( IS_CRON_RESUME_SCAN, array( $this, 'resume_stalled_scan' ) );
@@ -49,6 +70,14 @@ class IS_Cron {
 		}
 	}
 
+	/**
+	 * Registers the extra cron schedules this module relies on, without
+	 * assuming they don't already exist.
+	 *
+	 * @param array $schedules Existing cron schedules, as passed by the
+	 *                         'cron_schedules' filter.
+	 * @return array Schedules with our additions merged in.
+	 */
 	public function add_custom_schedules( $schedules ) {
 		$schedules['is_five_minutes'] = array(
 			'interval' => 5 * MINUTE_IN_SECONDS,
@@ -63,7 +92,12 @@ class IS_Cron {
 		return $schedules;
 	}
 
-	/** Pure: falls back to 'daily' for anything not one of our known schedules. */
+	/**
+	 * Pure: falls back to 'daily' for anything not one of our known schedules.
+	 *
+	 * @param string $frequency Candidate schedule slug.
+	 * @return string A valid schedule slug.
+	 */
 	public static function normalize_frequency( $frequency ) {
 		return in_array( $frequency, self::VALID_FREQUENCIES, true ) ? $frequency : 'daily';
 	}
@@ -72,6 +106,8 @@ class IS_Cron {
 	 * Reschedules the recurring scan at a new frequency, replacing
 	 * whatever was previously scheduled. Safe to call even if nothing
 	 * was scheduled yet (e.g. from activation).
+	 *
+	 * @param string $frequency Desired schedule slug.
 	 */
 	public static function reschedule_scan( $frequency ) {
 		$frequency = self::normalize_frequency( $frequency );
@@ -82,18 +118,26 @@ class IS_Cron {
 		wp_schedule_event( time() + ( 2 * HOUR_IN_SECONDS ), $frequency, IS_CRON_DAILY_SCAN );
 	}
 
+	/**
+	 * Fires on the configured recurrence: starts a fresh full scan and
+	 * drives it to completion, unless one is already running.
+	 */
 	public function run_daily_scan() {
 		$scanner = new IS_Scanner();
 		$db      = IS_DB::instance();
 
 		if ( $db->get_running_run() ) {
-			return; // don't stack a second scan on top of one already in progress
+			return; // Don't stack a second scan on top of one already in progress.
 		}
 
 		$run_id = $scanner->start_run( 'cron' );
 		$this->drive_to_completion( $scanner, $run_id, 500 );
 	}
 
+	/**
+	 * Safety-net cron: picks a scan back up if it has gone stale (no
+	 * activity within STALL_THRESHOLD), and checks the dead-man's switch.
+	 */
 	public function resume_stalled_scan() {
 		$this->maybe_alert_dead_man();
 
@@ -110,7 +154,7 @@ class IS_Cron {
 		$last_activity = ! empty( $run['last_activity_at'] ) ? $run['last_activity_at'] : $run['started_at'];
 		$age           = current_time( 'timestamp' ) - strtotime( $last_activity ); // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested -- compared against current_time('mysql')-sourced values
 		if ( $age < self::STALL_THRESHOLD ) {
-			return; // still plausibly an actively-driven scan, leave it alone
+			return; // Still plausibly an actively-driven scan, leave it alone.
 		}
 
 		$this->drive_to_completion( new IS_Scanner(), (int) $run['id'], 200 );
@@ -131,7 +175,7 @@ class IS_Cron {
 
 		$last = IS_DB::instance()->get_latest_completed_run();
 		if ( ! $last || empty( $last['finished_at'] ) ) {
-			return; // nothing has ever completed; the first scan hasn't happened yet
+			return; // Nothing has ever completed; the first scan hasn't happened yet.
 		}
 
 		$age = current_time( 'timestamp' ) - strtotime( $last['finished_at'] ); // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested -- compared against current_time('mysql')-sourced values
@@ -165,6 +209,10 @@ class IS_Cron {
 	 * lock (it's driving; back off), or the defensive iteration cap is
 	 * hit (a misbehaving host can't spin this forever -- the 5-minute
 	 * safety net will pick the run back up).
+	 *
+	 * @param IS_Scanner $scanner        Scanner instance to drive.
+	 * @param int        $run_id         ID of the run being processed.
+	 * @param int        $max_iterations Defensive cap on the number of batches to process.
 	 */
 	private function drive_to_completion( IS_Scanner $scanner, $run_id, $max_iterations ) {
 		do {

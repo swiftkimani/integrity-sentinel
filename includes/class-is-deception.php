@@ -1,4 +1,11 @@
 <?php
+/**
+ * Active-defense honeypots and canary tokens for catching malicious
+ * probing before it becomes a real compromise.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -21,8 +28,19 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Deception {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Deception|null
+	 */
 	private static $instance = null;
 
+	/**
+	 * Gets (and lazily creates) the singleton instance, wiring up hooks
+	 * the first time it is created.
+	 *
+	 * @return IS_Deception
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -31,6 +49,11 @@ class IS_Deception {
 		return self::$instance;
 	}
 
+	/**
+	 * Default settings for this module.
+	 *
+	 * @return array
+	 */
 	public static function default_settings() {
 		return array(
 			'enabled'      => 1,
@@ -49,6 +72,9 @@ class IS_Deception {
 		return $settings;
 	}
 
+	/**
+	 * Registers the honeypot check and the canary REST route.
+	 */
 	private function hooks() {
 		add_action( 'template_redirect', array( $this, 'maybe_trigger_honeypot' ), 1 );
 		add_action( 'rest_api_init', array( $this, 'register_canary_route' ) );
@@ -78,10 +104,22 @@ class IS_Deception {
 		);
 	}
 
+	/**
+	 * Whether the given normalized request path matches one of the
+	 * honeypot paths.
+	 *
+	 * @param string $normalized_path Path as returned by IS_Login::normalize_path().
+	 * @return bool
+	 */
 	public static function is_honeypot_path( $normalized_path ) {
 		return in_array( $normalized_path, self::honeypot_paths(), true );
 	}
 
+	/**
+	 * Generates a new random canary token value.
+	 *
+	 * @return string
+	 */
 	public static function generate_canary_token() {
 		return wp_generate_password( 40, false, false );
 	}
@@ -90,6 +128,10 @@ class IS_Deception {
 	// WP-dependent glue
 	// -----------------------------------------------------------------
 
+	/**
+	 * Checks the current request against the honeypot paths and, on a
+	 * match, responds via respond_to_trap().
+	 */
 	public function maybe_trigger_honeypot() {
 		IS_Guard::run(
 			'deception',
@@ -109,6 +151,9 @@ class IS_Deception {
 		);
 	}
 
+	/**
+	 * Registers the REST route used to check a canary token.
+	 */
 	public function register_canary_route() {
 		register_rest_route(
 			'integrity-sentinel/v1',
@@ -127,6 +172,14 @@ class IS_Deception {
 		);
 	}
 
+	/**
+	 * REST callback for the canary route: checks the submitted token
+	 * and, on a match, responds via respond_to_trap(). Always returns a
+	 * plain 404, whether the token matched or not.
+	 *
+	 * @param WP_REST_Request $request Incoming REST request.
+	 * @return WP_REST_Response
+	 */
 	public function handle_canary_check( WP_REST_Request $request ) {
 		return IS_Guard::run(
 			'deception',
@@ -147,7 +200,15 @@ class IS_Deception {
 		);
 	}
 
-	/** Shared response to either trap firing: temp-ban (unless whitelisted), fire the detection, and (for the honeypot path only) render a plain 404. */
+	/**
+	 * Shared response to either trap firing: temp-ban (unless
+	 * whitelisted), fire the detection, and (for the honeypot path only)
+	 * render a plain 404.
+	 *
+	 * @param array  $settings     Current module settings (for ban_minutes).
+	 * @param string $rule_id      Detection rule identifier for the trap that fired.
+	 * @param array  $extra_detail Extra detection detail to merge in (e.g. the matched path).
+	 */
 	private static function respond_to_trap( array $settings, $rule_id, array $extra_detail ) {
 		$ip = IS_IP_List::client_ip();
 		if ( '' !== $ip && ! IS_IP_List::is_whitelisted( $ip ) ) {
@@ -162,6 +223,11 @@ class IS_Deception {
 		}
 	}
 
+	/**
+	 * Generates and persists a new canary token, replacing the old one.
+	 *
+	 * @return string The new canary token.
+	 */
 	public static function regenerate_canary_token() {
 		$settings                 = self::settings();
 		$settings['canary_token'] = self::generate_canary_token();

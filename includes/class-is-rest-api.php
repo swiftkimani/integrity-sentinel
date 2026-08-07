@@ -139,7 +139,13 @@ class IS_Rest_API {
 				// limiting.
 				if ( ! empty( $settings['rate_limit'] ) && '' !== $ip && ! IS_IP_List::is_whitelisted( $ip ) ) {
 					if ( ! IS_Rate_Limiter::hit( 'rest_api', $ip, (int) $settings['rate_limit'], self::RATE_LIMIT_WINDOW ) ) {
-						IS_Detections::fire( 'rest_rate_limited', array( 'ip' => $ip, 'route' => $route ) );
+						IS_Detections::fire(
+							'rest_rate_limited',
+							array(
+								'ip'    => $ip,
+								'route' => $route,
+							)
+						);
 						return new WP_Error( 'is_rest_rate_limited', __( 'Too many REST API requests. Please slow down.', 'integrity-sentinel' ), array( 'status' => 429 ) );
 					}
 				}
@@ -166,7 +172,13 @@ class IS_Rest_API {
 					if ( self::numeric_id_route_match( $route ) ) {
 						$within_threshold = IS_Rate_Limiter::hit( 'rest_enum', $ip, (int) $settings['enumeration_threshold'], self::RATE_LIMIT_WINDOW );
 						if ( ! $within_threshold ) {
-							IS_Detections::fire( 'rest_enumeration_suspected', array( 'ip' => $ip, 'route' => $route ) );
+							IS_Detections::fire(
+								'rest_enumeration_suspected',
+								array(
+									'ip'    => $ip,
+									'route' => $route,
+								)
+							);
 							if ( ! empty( $settings['block_on_enumeration'] ) ) {
 								return new WP_Error( 'is_rest_enumeration_blocked', __( 'This IP has been temporarily blocked for suspicious REST API access patterns.', 'integrity-sentinel' ), array( 'status' => 429 ) );
 							}

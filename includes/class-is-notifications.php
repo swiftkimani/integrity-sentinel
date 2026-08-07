@@ -11,7 +11,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 class IS_Notifications {
 
 	private static $instance = null;
-	const SEVERITY_ORDER = array( 'critical' => 4, 'high' => 3, 'medium' => 2, 'low' => 1, 'info' => 0 );
+	const SEVERITY_ORDER     = array(
+		'critical' => 4,
+		'high'     => 3,
+		'medium'   => 2,
+		'low'      => 1,
+		'info'     => 0,
+	);
 
 	public static function instance() {
 		if ( null === self::$instance ) {
@@ -79,8 +85,8 @@ class IS_Notifications {
 	}
 
 	public function maybe_send_alert( $run_id ) {
-		$settings = get_option( 'is_scan_settings', array() );
-		$to       = $settings['alert_email'] ?? get_option( 'admin_email' );
+		$settings  = get_option( 'is_scan_settings', array() );
+		$to        = $settings['alert_email'] ?? get_option( 'admin_email' );
 		$threshold = $settings['alert_on_severity'] ?? 'high';
 
 		if ( empty( $to ) || ! is_email( $to ) ) {

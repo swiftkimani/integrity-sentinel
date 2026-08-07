@@ -129,17 +129,17 @@ class IS_Ajax {
 		$meta = json_decode( $finding['meta'] ?? '', true );
 		wp_send_json_success(
 			array(
-				'file_path' => $finding['file_path'],
-				'issue_type' => $finding['issue_type'],
-				'severity'   => $finding['severity'],
-				'detail'     => $finding['detail'],
-				'line'       => $meta['line'] ?? null,
-				'snippet'    => $meta['snippet'] ?? null,
-				'matches'    => $meta['matches'] ?? null,
+				'file_path'    => $finding['file_path'],
+				'issue_type'   => $finding['issue_type'],
+				'severity'     => $finding['severity'],
+				'detail'       => $finding['detail'],
+				'line'         => $meta['line'] ?? null,
+				'snippet'      => $meta['snippet'] ?? null,
+				'matches'      => $meta['matches'] ?? null,
 				'expected_md5' => $meta['expected_md5'] ?? null,
-				'file_hash'  => $finding['file_hash'],
-				'first_seen' => $finding['first_seen'],
-				'last_seen'  => $finding['last_seen'],
+				'file_hash'    => $finding['file_hash'],
+				'first_seen'   => $finding['first_seen'],
+				'last_seen'    => $finding['last_seen'],
 			)
 		);
 	}
@@ -158,7 +158,7 @@ class IS_Ajax {
 		// with, so the JS can hand over a FormData(form) of the in-progress
 		// (possibly unsaved) fields verbatim -- see initLoginDesignPreview()
 		// in is-admin.js.
-		$raw = isset( $_POST['is_login_design_settings'] ) && is_array( $_POST['is_login_design_settings'] ) ? wp_unslash( $_POST['is_login_design_settings'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitize_login_design_input() below is the sanitizer
+		$raw   = isset( $_POST['is_login_design_settings'] ) && is_array( $_POST['is_login_design_settings'] ) ? wp_unslash( $_POST['is_login_design_settings'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitize_login_design_input() below is the sanitizer
 		$draft = IS_Admin::instance()->sanitize_login_design_input( $raw, IS_Login_Design::settings() );
 		IS_Login_Design::store_preview( $draft );
 		wp_send_json_success( array( 'preview_url' => add_query_arg( 'is_preview', '1', wp_login_url() ) ) );

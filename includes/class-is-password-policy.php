@@ -165,14 +165,14 @@ class IS_Password_Policy {
 	 * @param WP_User  $user   User the reset is for (unused; the raw password
 	 *                         only lives in $_POST at this hook).
 	 */
-	public function check_password_reset( $errors, $user ) {
+	public function check_password_reset( $errors, $user ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- $user is required by the validate_password_reset hook's fixed signature
 		IS_Guard::run(
 			'password_policy',
 			function () use ( $errors ) {
 				if ( empty( self::settings()['enabled'] ) ) {
 					return;
 				}
-				$password = isset( $_POST['pass1'] ) ? (string) wp_unslash( $_POST['pass1'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- read-only strength check; the reset form's own signed key is the actual authorization
+				$password = isset( $_POST['pass1'] ) ? (string) wp_unslash( $_POST['pass1'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- read-only strength check (never stored/output); the reset form's own signed key is the actual authorization, and sanitizing a password would corrupt the exact characters being scored
 				if ( '' === $password ) {
 					return;
 				}

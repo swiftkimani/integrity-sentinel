@@ -75,7 +75,7 @@ class IS_Ajax {
 	 */
 	public function scan_batch() {
 		$this->guard();
-		$run_id = isset( $_POST['run_id'] ) ? (int) $_POST['run_id'] : 0;
+		$run_id = isset( $_POST['run_id'] ) ? (int) $_POST['run_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard() -> check_ajax_referer()
 		if ( ! $run_id ) {
 			wp_send_json_error( array( 'message' => __( 'Missing run id.', 'integrity-sentinel' ) ) );
 		}
@@ -116,8 +116,8 @@ class IS_Ajax {
 	 */
 	public function set_finding_status() {
 		$this->guard();
-		$id     = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0;
-		$status = isset( $_POST['status'] ) ? sanitize_key( wp_unslash( $_POST['status'] ) ) : '';
+		$id     = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard() -> check_ajax_referer()
+		$status = isset( $_POST['status'] ) ? sanitize_key( wp_unslash( $_POST['status'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard() -> check_ajax_referer()
 
 		if ( ! $id || ! in_array( $status, array( 'acknowledged', 'ignored', 'resolved', 'new' ), true ) ) {
 			wp_send_json_error( array( 'message' => __( 'Invalid request.', 'integrity-sentinel' ) ) );
@@ -151,7 +151,7 @@ class IS_Ajax {
 	 */
 	public function view_finding() {
 		$this->guard();
-		$id      = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0;
+		$id      = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard() -> check_ajax_referer()
 		$finding = $id ? IS_DB::instance()->get_finding( $id ) : null;
 
 		if ( ! $finding ) {
@@ -190,7 +190,7 @@ class IS_Ajax {
 		// with, so the JS can hand over a FormData(form) of the in-progress
 		// (possibly unsaved) fields verbatim -- see initLoginDesignPreview()
 		// in is-admin.js.
-		$raw   = isset( $_POST['is_login_design_settings'] ) && is_array( $_POST['is_login_design_settings'] ) ? wp_unslash( $_POST['is_login_design_settings'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitize_login_design_input() below is the sanitizer
+		$raw   = isset( $_POST['is_login_design_settings'] ) && is_array( $_POST['is_login_design_settings'] ) ? wp_unslash( $_POST['is_login_design_settings'] ) : array(); // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- verified above via guard() -> check_ajax_referer(); sanitize_login_design_input() below is the sanitizer
 		$draft = IS_Admin::instance()->sanitize_login_design_input( $raw, IS_Login_Design::settings() );
 		IS_Login_Design::store_preview( $draft );
 		wp_send_json_success( array( 'preview_url' => add_query_arg( 'is_preview', '1', wp_login_url() ) ) );

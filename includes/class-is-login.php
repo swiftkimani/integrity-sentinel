@@ -281,7 +281,7 @@ class IS_Login {
 	 * @param string $url  URL being filtered.
 	 * @param string $path Requested path component (unused; kept to match the filter signature).
 	 */
-	public function filter_site_url( $url, $path ) {
+	public function filter_site_url( $url, $path ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- $path is required by the site_url/network_site_url filter's fixed signature
 		return IS_Guard::run(
 			'login_rename',
 			function () use ( $url ) {

@@ -60,7 +60,7 @@ class IS_IP_List {
 			'whitelist'            => '',
 			'blacklist'            => '',
 			'trusted_proxy_ranges' => '',
-			'trusted_ip_header'    => '', // '', 'X-Forwarded-For', 'CF-Connecting-IP', 'X-Real-IP'
+			'trusted_ip_header'    => '', // allowed values: empty (disabled), X-Forwarded-For, CF-Connecting-IP, or X-Real-IP.
 		);
 	}
 

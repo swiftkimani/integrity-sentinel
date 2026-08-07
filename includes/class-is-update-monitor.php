@@ -56,6 +56,7 @@ class IS_Update_Monitor {
 
 		if ( 'install' === $action && in_array( $type, array( 'plugin', 'theme' ), true ) ) {
 			IS_Audit_Log::record( 'component_installed', array( 'type' => $type ) );
+			$user_login = wp_get_current_user()->user_login;
 			IS_Notifications::instance()->send_event(
 				'component_installed',
 				'plugin' === $type
@@ -66,7 +67,7 @@ class IS_Update_Monitor {
 						/* translators: 1: "plugin" or "theme", 2: user login */
 						__( 'A new %1$s was just installed by user "%2$s". If this was not you, investigate immediately.', 'integrity-sentinel' ),
 						$type,
-						wp_get_current_user()->user_login ?: __( '(unknown)', 'integrity-sentinel' )
+						$user_login ? $user_login : __( '(unknown)', 'integrity-sentinel' )
 					),
 				)
 			);
@@ -136,19 +137,20 @@ class IS_Update_Monitor {
 		);
 
 		if ( $mismatched ) {
+			$plugin_name = $data['Name'] ? $data['Name'] : $slug;
 			IS_Notifications::instance()->send_event(
 				'update_verification_failed',
 				sprintf(
 					/* translators: %s: plugin name */
 					__( 'Plugin update FAILED checksum verification: %s', 'integrity-sentinel' ),
-					$data['Name'] ?: $slug
+					$plugin_name
 				),
 				array_merge(
 					array(
 						sprintf(
 							/* translators: 1: plugin name, 2: version */
 							__( '%1$s was just updated to version %2$s, but these files do not match the official WordPress.org release:', 'integrity-sentinel' ),
-							$data['Name'] ?: $slug,
+							$plugin_name,
 							$version
 						),
 					),

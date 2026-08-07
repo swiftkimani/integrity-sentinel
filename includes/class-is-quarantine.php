@@ -175,7 +175,7 @@ class IS_Quarantine {
 		if ( ! @rename( $real_abs, $target ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.rename_rename -- error surfaced below
 			return new WP_Error( 'is_quarantine_move_failed', __( 'Could not move the file into quarantine — check filesystem permissions.', 'integrity-sentinel' ) );
 		}
-		@chmod( $target, 0400 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.chmod_chmod -- best-effort defense in depth, not load-bearing (the directory is already deny-all)
+		@chmod( $target, 0400 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.chmod_chmod, WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- best-effort defense in depth, not load-bearing (the directory is already deny-all); WP_Filesystem isn't guaranteed to be initialized here
 
 		$db = IS_DB::instance();
 		$id = $db->insert_quarantine_record(

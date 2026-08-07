@@ -43,30 +43,31 @@ class IS_Guard {
 	}
 
 	/**
-	 * Run $fn under fault isolation, keyed by a short module identifier
-	 * (e.g. 'ip_list', 'headers', 'login_rename'). Returns $fn()'s result
-	 * on success, or $default if safe mode is active, the module is
-	 * currently in its post-failure cooldown, or $fn() itself threw.
+	 * Run $callback under fault isolation, keyed by a short module
+	 * identifier (e.g. 'ip_list', 'headers', 'login_rename'). Returns
+	 * $callback()'s result on success, or $fallback if safe mode is
+	 * active, the module is currently in its post-failure cooldown, or
+	 * $callback() itself threw.
 	 *
-	 * @param string   $module  Short machine-readable module identifier.
-	 * @param callable $fn      The module's actual work.
-	 * @param mixed    $default Value to return when not run / on failure.
+	 * @param string   $module   Short machine-readable module identifier.
+	 * @param callable $callback The module's actual work.
+	 * @param mixed    $fallback Value to return when not run / on failure.
 	 */
-	public static function run( $module, callable $fn, $default = null ) {
+	public static function run( $module, callable $callback, $fallback = null ) {
 		if ( self::is_safe_mode() ) {
-			return $default;
+			return $fallback;
 		}
 		if ( self::is_disabled( self::health( $module ), time() ) ) {
-			return $default;
+			return $fallback;
 		}
 
 		try {
-			$result = $fn();
+			$result = $callback();
 			self::persist( $module, self::success_state( self::health( $module ) ) );
 			return $result;
 		} catch ( Throwable $e ) {
 			self::handle_failure( $module, $e );
-			return $default;
+			return $fallback;
 		}
 	}
 

@@ -181,6 +181,7 @@ class IS_Scanner {
 		$vuln_findings      = ( new IS_Vulnerability_Scanner() )->run_checks( $run_id, $this->db );
 		$core_result        = $this->check_core_integrity( $run_id );
 		$plugin_result      = $this->check_plugin_integrity( $run_id );
+		IS_SBOM::refresh_snapshot();
 
 		$extra_findings = $self_findings + $hardening_findings + $vuln_findings;
 		if ( ! is_wp_error( $core_result ) ) {
@@ -364,6 +365,26 @@ class IS_Scanner {
 								'snippet' => $first['snippet'],
 								'matches' => $rule_hit['matches'],
 							),
+						)
+					);
+					if ( $result['is_new'] ) {
+						++$new_count;
+					}
+				}
+
+				// 3. Exact-hash signature match against the admin-curated
+				// known-bad-hash list -- reuses the content already read
+				// above rather than hashing the file a second time.
+				foreach ( IS_Signatures::scan_content( $content ) as $rule_hit ) {
+					$result = $this->db->record_finding(
+						$run_id,
+						array(
+							'file_path'  => $relative_path,
+							'issue_type' => 'signature_match',
+							'severity'   => $rule_hit['severity'],
+							'rule_id'    => $rule_hit['rule_id'],
+							'detail'     => $rule_hit['label'],
+							'file_hash'  => hash( 'sha256', $content ),
 						)
 					);
 					if ( $result['is_new'] ) {

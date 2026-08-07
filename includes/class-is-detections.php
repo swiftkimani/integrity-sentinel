@@ -49,6 +49,11 @@ class IS_Detections {
 				'severity' => 'high',
 				'category' => 'credential-access',
 			),
+			'sbom_changed'                 => array(
+				'label'    => __( 'Software inventory changed', 'integrity-sentinel' ),
+				'severity' => 'low',
+				'category' => 'inventory-change',
+			),
 		);
 	}
 

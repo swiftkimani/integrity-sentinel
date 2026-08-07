@@ -214,4 +214,37 @@ class LoginTest extends TestCase {
 
 		$this->assertFalse( $result['just_locked'] );
 	}
+
+	// ---- credential stuffing (distinct usernames per IP) -------------------
+
+	const STUFFING_THRESHOLD = 8;
+
+	public function test_default_username_record_is_empty() {
+		$this->assertSame( array(), IS_Login::default_username_record()['usernames'] );
+	}
+
+	public function test_record_username_attempt_adds_a_new_username() {
+		$record = IS_Login::record_username_attempt( IS_Login::default_username_record(), 'alice' );
+		$this->assertSame( array( 'alice' ), $record['usernames'] );
+	}
+
+	public function test_record_username_attempt_does_not_duplicate() {
+		$record = IS_Login::record_username_attempt( array( 'usernames' => array( 'alice' ) ), 'alice' );
+		$this->assertSame( array( 'alice' ), $record['usernames'] );
+	}
+
+	public function test_record_username_attempt_ignores_blank_username() {
+		$record = IS_Login::record_username_attempt( IS_Login::default_username_record(), '   ' );
+		$this->assertSame( array(), $record['usernames'] );
+	}
+
+	public function test_below_threshold_is_not_credential_stuffing() {
+		$record = array( 'usernames' => array( 'a', 'b', 'c' ) );
+		$this->assertFalse( IS_Login::is_credential_stuffing( $record, self::STUFFING_THRESHOLD ) );
+	}
+
+	public function test_reaching_threshold_is_credential_stuffing() {
+		$record = array( 'usernames' => range( 'a', 'h' ) ); // 8 distinct usernames
+		$this->assertTrue( IS_Login::is_credential_stuffing( $record, self::STUFFING_THRESHOLD ) );
+	}
 }

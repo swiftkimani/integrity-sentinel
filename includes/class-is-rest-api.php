@@ -39,11 +39,17 @@ class IS_Rest_API {
 		return self::$instance;
 	}
 
+	const RATE_LIMIT_WINDOW = 5 * MINUTE_IN_SECONDS;
+
 	public static function default_settings() {
 		return array(
 			'block_user_enumeration'   => 1,
 			'restrict_unauthenticated' => 0,
 			'allowed_routes'           => '',
+			'rate_limit'               => 120,
+			'enumeration_detection'    => 1,
+			'enumeration_threshold'    => 20,
+			'block_on_enumeration'     => 0,
 		);
 	}
 
@@ -90,6 +96,24 @@ class IS_Rest_API {
 		return array_values( array_filter( array_map( 'trim', preg_split( '/\r\n|\r|\n/', (string) $text ) ) ) );
 	}
 
+	/**
+	 * Pure: whether $route is a single-object numeric-ID lookup on one of
+	 * WordPress core's own collection endpoints (e.g. /wp/v2/posts/123).
+	 * Used to spot enumeration -- a scanner walking IDs sequentially --
+	 * without needing to understand every possible custom post type or
+	 * namespace; the core collections are the ones enumeration actually
+	 * targets in practice (usernames, unpublished posts, private pages).
+	 */
+	public static function numeric_id_route_match( $route ) {
+		if ( preg_match( '#^/wp/v2/(posts|pages|users|comments|media)/(\d+)/?$#', (string) $route, $m ) ) {
+			return array(
+				'type' => $m[1],
+				'id'   => (int) $m[2],
+			);
+		}
+		return null;
+	}
+
 	// -----------------------------------------------------------------
 	// WP-dependent glue
 	// -----------------------------------------------------------------
@@ -105,6 +129,20 @@ class IS_Rest_API {
 				$settings  = self::settings();
 				$route     = $request->get_route();
 				$logged_in = is_user_logged_in();
+				$ip        = IS_IP_List::client_ip();
+
+				// General per-IP throttling across every REST route, ahead
+				// of the more specific checks below -- an unthrottled
+				// attacker previously had no ceiling at all on this filter
+				// (only the one custom endpoint in IS_Rest_Posts had a
+				// limiter). Whitelisted IPs bypass it, same as login rate
+				// limiting.
+				if ( ! empty( $settings['rate_limit'] ) && '' !== $ip && ! IS_IP_List::is_whitelisted( $ip ) ) {
+					if ( ! IS_Rate_Limiter::hit( 'rest_api', $ip, (int) $settings['rate_limit'], self::RATE_LIMIT_WINDOW ) ) {
+						IS_Detections::fire( 'rest_rate_limited', array( 'ip' => $ip, 'route' => $route ) );
+						return new WP_Error( 'is_rest_rate_limited', __( 'Too many REST API requests. Please slow down.', 'integrity-sentinel' ), array( 'status' => 429 ) );
+					}
+				}
 
 				if ( ! empty( $settings['block_user_enumeration'] ) && ! $logged_in && self::is_user_enumeration_route( $route ) ) {
 					IS_Audit_Log::record( 'rest_user_enumeration_blocked', array( 'route' => $route ) );
@@ -115,6 +153,24 @@ class IS_Rest_API {
 					$allowed = self::parse_route_list( $settings['allowed_routes'] );
 					if ( ! self::route_is_allowlisted( $route, $allowed ) ) {
 						return new WP_Error( 'is_rest_restricted', __( 'The REST API is restricted to authenticated requests on this site.', 'integrity-sentinel' ), array( 'status' => 401 ) );
+					}
+				}
+
+				// Enumeration-velocity detection: a scanner walking
+				// sequential numeric IDs on a core collection shows up as a
+				// burst of single-object lookups from one IP. Logged by
+				// default; blocking is opt-in since a very active
+				// legitimate integration could plausibly trip the
+				// threshold too.
+				if ( ! empty( $settings['enumeration_detection'] ) && ! $logged_in && '' !== $ip && ! IS_IP_List::is_whitelisted( $ip ) ) {
+					if ( self::numeric_id_route_match( $route ) ) {
+						$within_threshold = IS_Rate_Limiter::hit( 'rest_enum', $ip, (int) $settings['enumeration_threshold'], self::RATE_LIMIT_WINDOW );
+						if ( ! $within_threshold ) {
+							IS_Detections::fire( 'rest_enumeration_suspected', array( 'ip' => $ip, 'route' => $route ) );
+							if ( ! empty( $settings['block_on_enumeration'] ) ) {
+								return new WP_Error( 'is_rest_enumeration_blocked', __( 'This IP has been temporarily blocked for suspicious REST API access patterns.', 'integrity-sentinel' ), array( 'status' => 429 ) );
+							}
+						}
 					}
 				}
 

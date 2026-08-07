@@ -1,0 +1,108 @@
+<?php
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+/**
+ * A small structured-detection registry: every behavioral/abuse signal
+ * raised anywhere in the plugin (rate limiting, credential stuffing,
+ * enumeration, and later phases: honeypots, session anomalies, ...) fires
+ * through here instead of calling IS_Audit_Log/IS_Notifications directly.
+ * That gives every detection a consistent severity and category without
+ * a database migration -- the audit log's `action`/`detail` columns are
+ * unchanged, this just standardizes what goes into them.
+ *
+ * Categories are loose, human-readable labels (not formal ATT&CK
+ * technique IDs) -- precise technique mapping would need per-case
+ * judgement this registry can't make safely, so it sticks to a short,
+ * honest tactic-level word instead of a specific ID that might be wrong.
+ */
+class IS_Detections {
+
+	const SEVERITY_ORDER      = array(
+		'critical' => 4,
+		'high'     => 3,
+		'medium'   => 2,
+		'low'      => 1,
+		'info'     => 0,
+	);
+	const NOTIFY_MIN_SEVERITY = 'high';
+
+	/**
+	 * Pure: the rule registry. New phases add entries here rather than
+	 * inventing their own ad hoc severity/category at the call site.
+	 */
+	public static function rules() {
+		return array(
+			'rest_rate_limited'            => array(
+				'label'    => __( 'REST API rate limit exceeded', 'integrity-sentinel' ),
+				'severity' => 'medium',
+				'category' => 'denial-of-service',
+			),
+			'rest_enumeration_suspected'   => array(
+				'label'    => __( 'Suspicious sequential REST API ID access', 'integrity-sentinel' ),
+				'severity' => 'medium',
+				'category' => 'reconnaissance',
+			),
+			'credential_stuffing_detected' => array(
+				'label'    => __( 'Credential stuffing attack detected', 'integrity-sentinel' ),
+				'severity' => 'high',
+				'category' => 'credential-access',
+			),
+		);
+	}
+
+	/**
+	 * Pure: looks up a rule, falling back to a generic 'info' shape for
+	 * an unregistered rule_id rather than erroring -- a typo'd rule_id
+	 * should still get logged, just without a wrong severity guess.
+	 */
+	public static function rule( $rule_id ) {
+		$rules = self::rules();
+		if ( isset( $rules[ $rule_id ] ) ) {
+			return $rules[ $rule_id ];
+		}
+		return array(
+			'label'    => $rule_id,
+			'severity' => 'info',
+			'category' => 'uncategorized',
+		);
+	}
+
+	/** Pure: flattens a detail array into human-readable lines for email/webhook bodies. */
+	public static function format_detail_lines( array $detail ) {
+		$lines = array();
+		foreach ( $detail as $key => $value ) {
+			$lines[] = sprintf( '%s: %s', $key, is_scalar( $value ) ? (string) $value : wp_json_encode( $value ) );
+		}
+		return $lines;
+	}
+
+	/**
+	 * Records the detection to the audit log and, for high/critical
+	 * severity, alerts through IS_Notifications too.
+	 *
+	 * @param string $rule_id Key into rules().
+	 * @param array  $detail  Extra context (ip, route, counts, ...).
+	 */
+	public static function fire( $rule_id, array $detail = array() ) {
+		$rule = self::rule( $rule_id );
+
+		IS_Audit_Log::record(
+			'detect_' . $rule_id,
+			array_merge(
+				array(
+					'severity' => $rule['severity'],
+					'category' => $rule['category'],
+				),
+				$detail
+			)
+		);
+
+		$rank     = self::SEVERITY_ORDER[ $rule['severity'] ] ?? 0;
+		$min_rank = self::SEVERITY_ORDER[ self::NOTIFY_MIN_SEVERITY ] ?? 0;
+		if ( $rank >= $min_rank ) {
+			IS_Notifications::instance()->send_event( $rule_id, $rule['label'], self::format_detail_lines( $detail ) );
+		}
+	}
+}

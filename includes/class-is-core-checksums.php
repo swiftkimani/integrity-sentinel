@@ -35,8 +35,8 @@ class IS_Core_Checksums {
 	 */
 	public function get_checksums( $version = null, $locale = null ) {
 		global $wp_version;
-		$version = $version ?: $wp_version;
-		$locale  = $locale ?: get_locale();
+		$version = $version ? $version : $wp_version;
+		$locale  = $locale ? $locale : get_locale();
 
 		$cache_key = 'is_core_checksums_' . md5( $version . '|' . $locale );
 		$cached    = get_transient( $cache_key );

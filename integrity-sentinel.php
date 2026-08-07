@@ -32,11 +32,11 @@ define( 'IS_DB_VERSION', '4' );
  * anywhere plain WordPress runs.
  */
 spl_autoload_register(
-	function ( $class ) {
-		if ( strpos( $class, 'IS_' ) !== 0 ) {
+	function ( $class_name ) {
+		if ( strpos( $class_name, 'IS_' ) !== 0 ) {
 			return;
 		}
-		$file = IS_PLUGIN_DIR . 'includes/class-is-' . strtolower( str_replace( '_', '-', substr( $class, 3 ) ) ) . '.php';
+		$file = IS_PLUGIN_DIR . 'includes/class-is-' . strtolower( str_replace( '_', '-', substr( $class_name, 3 ) ) ) . '.php';
 		if ( file_exists( $file ) ) {
 			require_once $file;
 		}

@@ -234,7 +234,7 @@ class IS_2FA {
 		$this->guard_own_profile_action( $user_id );
 
 		$secret = get_transient( 'is_2fa_setup_' . $user_id );
-		$code   = isset( $_POST['is_2fa_code'] ) ? sanitize_text_field( wp_unslash( $_POST['is_2fa_code'] ) ) : '';
+		$code   = isset( $_POST['is_2fa_code'] ) ? sanitize_text_field( wp_unslash( $_POST['is_2fa_code'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_own_profile_action() -> check_admin_referer( 'is_2fa_action' )
 
 		$redirect = get_edit_profile_url( $user_id ) . '#is-2fa';
 
@@ -467,13 +467,13 @@ class IS_2FA {
 					self::pending_key( $token ),
 					array(
 						'user_id'  => $user->ID,
-						'remember' => ! empty( $_POST['rememberme'] ), // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- mirrors wp-login.php's own unauthenticated handling of this field
+						'remember' => ! empty( $_POST['rememberme'] ), // phpcs:ignore WordPress.Security.NonceVerification.Missing -- mirrors wp-login.php's own unauthenticated handling of this field, before any user is logged in (no nonce is possible yet)
 						'attempts' => 0,
 					),
 					self::PENDING_TTL
 				);
 
-				$redirect_to = isset( $_REQUEST['redirect_to'] ) ? wp_unslash( $_REQUEST['redirect_to'] ) : admin_url(); // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- passed straight to wp_safe_redirect() below, which validates it
+				$redirect_to = isset( $_REQUEST['redirect_to'] ) ? wp_unslash( $_REQUEST['redirect_to'] ) : admin_url(); // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- passed straight to wp_safe_redirect() below, which validates it
 
 				wp_safe_redirect(
 					add_query_arg(
@@ -514,8 +514,8 @@ class IS_2FA {
 					);
 				}
 
-				if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
-					$this->render_verify_form( $token, isset( $_GET['redirect_to'] ) ? wp_unslash( $_GET['redirect_to'] ) : '', false ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- display-only, echoed via esc_url() in render_verify_form()
+				if ( 'POST' !== sanitize_text_field( wp_unslash( $_SERVER['REQUEST_METHOD'] ?? '' ) ) ) {
+					$this->render_verify_form( $token, isset( $_GET['redirect_to'] ) ? wp_unslash( $_GET['redirect_to'] ) : '', false ); // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only, echoed via esc_url() in render_verify_form()
 					exit;
 				}
 
@@ -549,7 +549,7 @@ class IS_2FA {
 					$pending['attempts'] = (int) $pending['attempts'] + 1;
 					set_transient( self::pending_key( $token ), $pending, self::PENDING_TTL );
 					IS_Audit_Log::record( '2fa_code_rejected', array( 'user_id' => $user_id ) );
-					$this->render_verify_form( $token, isset( $_POST['redirect_to'] ) ? wp_unslash( $_POST['redirect_to'] ) : '', true ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- display-only, echoed via esc_url() in render_verify_form()
+					$this->render_verify_form( $token, isset( $_POST['redirect_to'] ) ? wp_unslash( $_POST['redirect_to'] ) : '', true ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only, echoed via esc_url() in render_verify_form()
 					exit;
 				}
 
@@ -562,7 +562,7 @@ class IS_2FA {
 
 				IS_Audit_Log::record( '2fa_login_verified', array( 'user_id' => $user_id ) );
 
-				$redirect_to = isset( $_POST['redirect_to'] ) ? wp_unslash( $_POST['redirect_to'] ) : admin_url(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- passed straight to wp_safe_redirect(), which validates it
+				$redirect_to = isset( $_POST['redirect_to'] ) ? wp_unslash( $_POST['redirect_to'] ) : admin_url(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- passed straight to wp_safe_redirect(), which validates it
 				wp_safe_redirect( $redirect_to );
 				exit;
 			}

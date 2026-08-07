@@ -1164,7 +1164,7 @@ class IS_Admin {
 	 * .htaccess-write primitive.
 	 */
 	private function resolve_exec_block_target() {
-		$key     = isset( $_POST['target'] ) ? sanitize_key( wp_unslash( $_POST['target'] ) ) : '';
+		$key     = isset( $_POST['target'] ) ? sanitize_key( wp_unslash( $_POST['target'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- both callers verify via guard_hardening_action() -> check_admin_referer() before calling this
 		$targets = IS_Hardening::exec_block_targets();
 		return isset( $targets[ $key ] ) ? $targets[ $key ] : null;
 	}
@@ -1222,7 +1222,7 @@ class IS_Admin {
 	public function handle_quarantine_finding() {
 		$this->guard_quarantine_action();
 
-		$finding_id = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0;
+		$finding_id = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_quarantine_action() -> check_admin_referer()
 		$finding    = $finding_id ? IS_DB::instance()->get_finding( $finding_id ) : null;
 		$url        = admin_url( 'admin.php?page=integrity-sentinel-findings' );
 
@@ -1246,7 +1246,7 @@ class IS_Admin {
 	 */
 	public function handle_quarantine_restore() {
 		$this->guard_quarantine_action();
-		$id     = isset( $_POST['quarantine_id'] ) ? (int) $_POST['quarantine_id'] : 0;
+		$id     = isset( $_POST['quarantine_id'] ) ? (int) $_POST['quarantine_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_quarantine_action() -> check_admin_referer()
 		$result = $id ? IS_Quarantine::restore( $id, get_current_user_id() ) : new WP_Error( 'is_quarantine_invalid', __( 'Invalid request.', 'integrity-sentinel' ) );
 		$this->redirect_quarantine( $result );
 	}
@@ -1257,11 +1257,11 @@ class IS_Admin {
 	public function handle_quarantine_delete() {
 		$this->guard_quarantine_action();
 
-		if ( empty( $_POST['is_quarantine_confirm'] ) ) {
+		if ( empty( $_POST['is_quarantine_confirm'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_quarantine_action() -> check_admin_referer()
 			$this->redirect_quarantine( new WP_Error( 'is_quarantine_not_confirmed', __( 'You must check the confirmation box to permanently delete a file.', 'integrity-sentinel' ) ) );
 		}
 
-		$id     = isset( $_POST['quarantine_id'] ) ? (int) $_POST['quarantine_id'] : 0;
+		$id     = isset( $_POST['quarantine_id'] ) ? (int) $_POST['quarantine_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_quarantine_action() -> check_admin_referer()
 		$result = $id ? IS_Quarantine::delete_permanently( $id, get_current_user_id() ) : new WP_Error( 'is_quarantine_invalid', __( 'Invalid request.', 'integrity-sentinel' ) );
 		$this->redirect_quarantine( $result );
 	}
@@ -1325,7 +1325,7 @@ class IS_Admin {
 	 */
 	public function handle_check_ip_reputation() {
 		$this->guard_threat_intel_action();
-		$ip  = isset( $_POST['ip'] ) ? sanitize_text_field( wp_unslash( $_POST['ip'] ) ) : '';
+		$ip  = isset( $_POST['ip'] ) ? sanitize_text_field( wp_unslash( $_POST['ip'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_threat_intel_action() -> check_admin_referer()
 		$url = admin_url( 'admin.php?page=integrity-sentinel-audit' );
 
 		if ( '' === $ip || false === filter_var( $ip, FILTER_VALIDATE_IP ) ) {
@@ -1356,7 +1356,7 @@ class IS_Admin {
 	 */
 	public function handle_check_hash_reputation() {
 		$this->guard_threat_intel_action();
-		$finding_id = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0;
+		$finding_id = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_threat_intel_action() -> check_admin_referer()
 		$finding    = $finding_id ? IS_DB::instance()->get_finding( $finding_id ) : null;
 		$url        = admin_url( 'admin.php?page=integrity-sentinel-findings' );
 
@@ -1742,8 +1742,8 @@ class IS_Admin {
 			)
 		);
 		$pages       = max( 1, (int) ceil( $total / $per_page ) );
-		$error       = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
-		$ti_result   = isset( $_GET['is_ti_result'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_ti_result'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$error       = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
+		$ti_result   = isset( $_GET['is_ti_result'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_ti_result'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
 		$ti_settings = IS_Threat_Intel::settings();
 		$ti_ready    = ! empty( $ti_settings['enabled'] ) && '' !== trim( (string) $ti_settings['virustotal_key'] );
 		$this->render_shell_open( 'findings' );
@@ -1893,7 +1893,7 @@ class IS_Admin {
 		$status   = isset( $_GET['status'] ) ? sanitize_key( wp_unslash( $_GET['status'] ) ) : 'quarantined'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only filter, not a state change
 		$paged    = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		$per_page = 30;
-		$error    = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$error    = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
 
 		$items = $db->get_quarantine_items( $status, $per_page, ( $paged - 1 ) * $per_page );
 		$total = $db->count_quarantine_items( $status );
@@ -2014,7 +2014,7 @@ class IS_Admin {
 			return;
 		}
 		$active = IS_Hardening::uploads_block_active();
-		$error  = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$error  = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
 		$this->render_shell_open( 'hardening' );
 		?>
 		<div class="wrap is-wrap">
@@ -3357,8 +3357,8 @@ class IS_Admin {
 		$entries     = IS_Audit_Log::entries( $per_page, ( $paged - 1 ) * $per_page );
 		$total       = IS_Audit_Log::count();
 		$pages       = max( 1, (int) ceil( $total / $per_page ) );
-		$error       = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
-		$ti_result   = isset( $_GET['is_ti_result'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_ti_result'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$error       = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
+		$ti_result   = isset( $_GET['is_ti_result'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_ti_result'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
 		$ti_settings = IS_Threat_Intel::settings();
 		$ti_ready    = ! empty( $ti_settings['enabled'] ) && '' !== trim( (string) $ti_settings['abuseipdb_key'] );
 		$this->render_shell_open( 'audit' );

@@ -221,7 +221,7 @@ class IS_DB {
 	 */
 	public function get_latest_run() {
 		global $wpdb;
-		return $wpdb->get_row( "SELECT * FROM {$this->runs_table()} ORDER BY id DESC LIMIT 1", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		return $wpdb->get_row( "SELECT * FROM {$this->runs_table()} ORDER BY id DESC LIMIT 1", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name, not user input
 	}
 
 	/**
@@ -229,7 +229,7 @@ class IS_DB {
 	 */
 	public function get_running_run() {
 		global $wpdb;
-		return $wpdb->get_row( "SELECT * FROM {$this->runs_table()} WHERE status = 'running' ORDER BY id DESC LIMIT 1", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		return $wpdb->get_row( "SELECT * FROM {$this->runs_table()} WHERE status = 'running' ORDER BY id DESC LIMIT 1", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name, not user input; 'running' is a hardcoded literal, not user data
 	}
 
 	/**
@@ -237,7 +237,7 @@ class IS_DB {
 	 */
 	public function get_latest_completed_run() {
 		global $wpdb;
-		return $wpdb->get_row( "SELECT * FROM {$this->runs_table()} WHERE status = 'completed' ORDER BY id DESC LIMIT 1", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		return $wpdb->get_row( "SELECT * FROM {$this->runs_table()} WHERE status = 'completed' ORDER BY id DESC LIMIT 1", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name, not user input; 'completed' is a hardcoded literal, not user data
 	}
 
 	/**
@@ -534,7 +534,7 @@ class IS_DB {
 		$params[] = $limit;
 		$params[] = $offset;
 
-		return $wpdb->get_results( $wpdb->prepare( $sql, $params ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		return $wpdb->get_results( $wpdb->prepare( $sql, $params ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $sql is passed through $wpdb->prepare() with an array of args on the line above; the sniff can't see past the intermediate $sql variable
 	}
 
 	/**
@@ -559,9 +559,9 @@ class IS_DB {
 
 		$sql = "SELECT COUNT(*) FROM {$table} WHERE " . implode( ' AND ', $where );
 		if ( $params ) {
-			return (int) $wpdb->get_var( $wpdb->prepare( $sql, $params ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			return (int) $wpdb->get_var( $wpdb->prepare( $sql, $params ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $sql is passed through $wpdb->prepare() with an array of args on this same line; the sniff can't see past the intermediate $sql variable
 		}
-		return (int) $wpdb->get_var( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery
+		return (int) $wpdb->get_var( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery -- no $params to bind (the WHERE clause is empty here), and the only interpolated value is the table name
 	}
 
 	/**

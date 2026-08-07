@@ -118,6 +118,7 @@ class IS_Heuristics {
 				// with (as commonly indexed by AV/webshell scanners), not on
 				// any functional payload. Concatenated so this file's own
 				// source never matches its own rule.
+				// phpcs:disable Generic.Strings.UnnecessaryStringConcat.Found -- deliberately split (see class docblock): merging these back into single literals would make this file's own source match its own known_webshell_marker rule.
 				'pattern'  => '/(?:' . implode(
 					'|',
 					array(
@@ -128,6 +129,7 @@ class IS_Heuristics {
 						'r5' . '7shell',
 					)
 				) . ')/i',
+				// phpcs:enable Generic.Strings.UnnecessaryStringConcat.Found
 			),
 			array(
 				'id'       => 'chr_concat_function_build',
@@ -313,16 +315,16 @@ class IS_Heuristics {
 	 * source code sit well under 4.5; base64/hex/binary-packed data
 	 * commonly sits at 4.8+.
 	 *
-	 * @param string $string String to measure.
+	 * @param string $value String to measure.
 	 * @return float Entropy in bits per byte.
 	 */
-	public static function shannon_entropy( $string ) {
-		$len = strlen( $string );
+	public static function shannon_entropy( $value ) {
+		$len = strlen( $value );
 		if ( 0 === $len ) {
 			return 0.0;
 		}
 		$entropy = 0.0;
-		foreach ( count_chars( $string, 1 ) as $count ) {
+		foreach ( count_chars( $value, 1 ) as $count ) {
 			$p        = $count / $len;
 			$entropy -= $p * log( $p, 2 );
 		}

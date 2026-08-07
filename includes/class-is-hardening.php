@@ -202,7 +202,9 @@ class IS_Hardening {
 			$this->check_administrators(),
 			$this->check_closed_plugins(),
 			$this->check_core_update(),
-			$this->check_dangerous_functions()
+			$this->check_dangerous_functions(),
+			$this->check_salt_uniqueness(),
+			$this->check_plaintext_secrets()
 		);
 	}
 
@@ -333,6 +335,108 @@ class IS_Hardening {
 		return ! is_string( $value )
 			|| strlen( $value ) < 32
 			|| false !== stripos( $value, 'put your unique phrase here' );
+	}
+
+	const SALT_CONSTANTS = array( 'AUTH_KEY', 'SECURE_AUTH_KEY', 'LOGGED_IN_KEY', 'NONCE_KEY', 'AUTH_SALT', 'SECURE_AUTH_SALT', 'LOGGED_IN_SALT', 'NONCE_SALT' );
+
+	/**
+	 * Pure: which constant names share an identical value with another
+	 * one in the set? Two salts sharing a value is worse than either
+	 * being individually weak -- it collapses two supposedly-independent
+	 * secrets into one -- and is_weak_salt_value() alone can't catch it,
+	 * since a duplicated value can still be long and non-placeholder.
+	 *
+	 * @param array<string,string> $salts constant name => value
+	 * @return string[] constant names involved in a duplicate, empty if none
+	 */
+	public static function duplicate_salt_names( array $salts ) {
+		$seen  = array();
+		$dupes = array();
+		foreach ( $salts as $name => $value ) {
+			if ( ! is_string( $value ) || '' === $value ) {
+				continue;
+			}
+			$hash = md5( $value );
+			if ( isset( $seen[ $hash ] ) ) {
+				$dupes[] = $seen[ $hash ];
+				$dupes[] = $name;
+			} else {
+				$seen[ $hash ] = $name;
+			}
+		}
+		return array_values( array_unique( $dupes ) );
+	}
+
+	private function check_salt_uniqueness() {
+		$salts = array();
+		foreach ( self::SALT_CONSTANTS as $name ) {
+			$salts[ $name ] = defined( $name ) ? constant( $name ) : '';
+		}
+		$duplicates = self::duplicate_salt_names( $salts );
+		if ( empty( $duplicates ) ) {
+			return array();
+		}
+		return array(
+			$this->finding(
+				'duplicate_auth_salts',
+				'high',
+				'wp-config.php',
+				sprintf(
+					/* translators: %s: comma-separated list of constant names */
+					__( 'These authentication keys/salts share an identical value: %s. Each should be an independent secret — regenerate them from the WordPress.org secret-key service.', 'integrity-sentinel' ),
+					implode( ', ', $duplicates )
+				)
+			),
+		);
+	}
+
+	/**
+	 * Pure: which of a set of option-name => decoded-settings pairs hold
+	 * a non-empty external API key/secret field -- informational only,
+	 * since every WordPress plugin's options are plaintext in wp_options
+	 * by convention; this is transparency about THIS plugin's own
+	 * storage, not a claim it's uniquely at fault.
+	 *
+	 * @param array<string,array<string,mixed>> $all_settings
+	 * @return string[] option names holding a non-empty secret-shaped field
+	 */
+	public static function options_with_plaintext_secrets( array $all_settings ) {
+		$secret_fields = array( 'api_key', 'abuseipdb_key', 'virustotal_key' );
+		$out           = array();
+		foreach ( $all_settings as $option_name => $settings ) {
+			foreach ( $secret_fields as $field ) {
+				if ( ! empty( $settings[ $field ] ) ) {
+					$out[] = $option_name;
+					break;
+				}
+			}
+		}
+		return $out;
+	}
+
+	private function check_plaintext_secrets() {
+		$flagged = self::options_with_plaintext_secrets(
+			array(
+				'is_vulnerability_scanner_settings' => IS_Vulnerability_Scanner::settings(),
+				'is_threat_intel_settings'          => IS_Threat_Intel::settings(),
+			)
+		);
+		if ( empty( $flagged ) ) {
+			return array();
+		}
+		return array(
+			$this->finding(
+				'plaintext_api_keys_stored',
+				'low',
+				'wp_options',
+				sprintf(
+					/* translators: 1: number of options holding a key, 2: comma-separated option names */
+					__( 'This plugin stores %1$d configured external API key(s) as plaintext in the WordPress options table (%2$s) — standard practice for WordPress plugins, but worth knowing: anyone with direct database access can read them. If that\'s a concern on your hosting, restrict database access and rotate keys periodically.', 'integrity-sentinel' ),
+					count( $flagged ),
+					implode( ', ', $flagged )
+				)
+			),
+		);
 	}
 
 	private function check_world_writable() {

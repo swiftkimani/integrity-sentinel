@@ -130,6 +130,62 @@ class IS_Headers {
 	}
 
 	/**
+	 * Pure: scores this plugin's OWN header-hardening configuration
+	 * against a small checklist -- deliberately not a general
+	 * securityheaders.com-style audit of every possible header (this
+	 * plugin doesn't set HSTS, for instance: forcing HTTPS site-wide
+	 * from a plugin risks locking out a site not fully migrated to it
+	 * yet), scoped to exactly what these settings control.
+	 *
+	 * @return array{score:int,max:int,items:array<array{key:string,label:string,passed:bool}>}
+	 */
+	public static function audit_score( array $settings ) {
+		$headers = self::security_header_lines( $settings );
+		$csp     = isset( $headers['Content-Security-Policy'] ) ? $headers['Content-Security-Policy'] : ( $headers['Content-Security-Policy-Report-Only'] ?? '' );
+
+		$items = array(
+			array(
+				'key'    => 'security_headers',
+				'label'  => __( 'X-Content-Type-Options / Referrer-Policy / Permissions-Policy sent', 'integrity-sentinel' ),
+				'passed' => isset( $headers['X-Content-Type-Options'] ),
+			),
+			array(
+				'key'    => 'clickjacking',
+				'label'  => __( 'Clickjacking protection (X-Frame-Options or frame-ancestors)', 'integrity-sentinel' ),
+				'passed' => isset( $headers['X-Frame-Options'] ) || false !== stripos( $csp, 'frame-ancestors' ),
+			),
+			array(
+				'key'    => 'csp_enforced',
+				'label'  => __( 'Content-Security-Policy enforced (not report-only)', 'integrity-sentinel' ),
+				'passed' => isset( $headers['Content-Security-Policy'] ),
+			),
+			array(
+				'key'    => 'hide_wp_version',
+				'label'  => __( 'WordPress version hidden', 'integrity-sentinel' ),
+				'passed' => ! empty( $settings['hide_wp_version'] ),
+			),
+			array(
+				'key'    => 'hide_meta_fingerprints',
+				'label'  => __( 'Fingerprinting head links / REST discovery header removed', 'integrity-sentinel' ),
+				'passed' => ! empty( $settings['hide_meta_fingerprints'] ),
+			),
+		);
+
+		$score = 0;
+		foreach ( $items as $item ) {
+			if ( $item['passed'] ) {
+				++$score;
+			}
+		}
+
+		return array(
+			'score' => $score,
+			'max'   => count( $items ),
+			'items' => $items,
+		);
+	}
+
+	/**
 	 * Frontend coverage via send_headers, login page via login_init --
 	 * wp-admin intentionally isn't covered here: WP core doesn't send
 	 * these there either, admin pages already require authentication,

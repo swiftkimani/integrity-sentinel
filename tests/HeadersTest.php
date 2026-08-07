@@ -172,4 +172,53 @@ class HeadersTest extends TestCase {
 		$this->assertSame( 0, $defaults['disable_feeds'] );
 		$this->assertSame( '', $defaults['content_security_policy'] );
 	}
+
+	// ---- audit_score -----------------------------------------------------
+
+	public function test_full_default_settings_score_high_but_not_full() {
+		// Defaults enable everything except an enforced CSP (report-only
+		// is the safe default), so the score should be one short of max.
+		$score = IS_Headers::audit_score( IS_Headers::default_settings() );
+		$this->assertSame( $score['max'] - 1, $score['score'] );
+	}
+
+	public function test_enforced_csp_reaches_full_score() {
+		$settings                              = IS_Headers::default_settings();
+		$settings['content_security_policy']   = "default-src 'self';";
+		$settings['csp_report_only']           = 0;
+		$score                                 = IS_Headers::audit_score( $settings );
+		$this->assertSame( $score['max'], $score['score'] );
+	}
+
+	public function test_everything_off_scores_zero() {
+		$settings = array(
+			'security_headers'        => 0,
+			'prevent_clickjacking'    => 0,
+			'hide_wp_version'         => 0,
+			'hide_meta_fingerprints'  => 0,
+			'content_security_policy' => '',
+			'csp_report_only'         => 1,
+		);
+		$score = IS_Headers::audit_score( $settings );
+		$this->assertSame( 0, $score['score'] );
+	}
+
+	public function test_frame_ancestors_in_csp_counts_as_clickjacking_protection() {
+		$settings = array(
+			'security_headers'        => 0,
+			'prevent_clickjacking'    => 0,
+			'hide_wp_version'         => 0,
+			'hide_meta_fingerprints'  => 0,
+			'content_security_policy' => "frame-ancestors 'self';",
+			'csp_report_only'         => 0,
+		);
+		$score = IS_Headers::audit_score( $settings );
+		$clickjacking = null;
+		foreach ( $score['items'] as $item ) {
+			if ( 'clickjacking' === $item['key'] ) {
+				$clickjacking = $item['passed'];
+			}
+		}
+		$this->assertTrue( $clickjacking );
+	}
 }

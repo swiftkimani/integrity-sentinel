@@ -36,6 +36,7 @@ class IS_Admin {
 		add_action( 'admin_post_is_check_hash_reputation', array( $this, 'handle_check_hash_reputation' ) );
 		add_action( 'admin_post_is_download_sbom', array( $this, 'handle_download_sbom' ) );
 		add_action( 'admin_post_is_regenerate_canary_token', array( $this, 'handle_regenerate_canary_token' ) );
+		add_action( 'admin_post_is_export_compliance_report', array( $this, 'handle_export_compliance_report' ) );
 	}
 
 	public function add_menu() {
@@ -57,6 +58,7 @@ class IS_Admin {
 		add_submenu_page( 'integrity-sentinel', __( 'Login Design', 'integrity-sentinel' ), __( 'Login Design', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-login-design', array( $this, 'render_login_design' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'REST API', 'integrity-sentinel' ), __( 'REST API', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-rest', array( $this, 'render_rest_api' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Audit Log', 'integrity-sentinel' ), __( 'Audit Log', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-audit', array( $this, 'render_audit_log' ) );
+		add_submenu_page( 'integrity-sentinel', __( 'Reports & Compliance', 'integrity-sentinel' ), __( 'Reports & Compliance', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-reports', array( $this, 'render_reports' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Settings', 'integrity-sentinel' ), __( 'Settings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-settings', array( $this, 'render_settings' ) );
 
 		// Every page above stays fully registered with add_submenu_page()
@@ -147,6 +149,12 @@ class IS_Admin {
 				'label' => __( 'Audit Log', 'integrity-sentinel' ),
 				'slug'  => 'integrity-sentinel-audit',
 				'icon'  => 'dashicons-list-view',
+			),
+			array(
+				'key'   => 'reports',
+				'label' => __( 'Reports & Compliance', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-reports',
+				'icon'  => 'dashicons-media-text',
 			),
 			array(
 				'key'   => 'settings',
@@ -3207,6 +3215,215 @@ class IS_Admin {
 		</div>
 		<?php
 		$this->render_shell_close();
+	}
+
+	// -----------------------------------------------------------------
+	// Reports & Compliance
+	// -----------------------------------------------------------------
+
+	/**
+	 * The controls this plugin can itself confirm are enabled, pulled
+	 * straight from every module's own settings()/status getters --
+	 * nothing new to track, just a single-page summary of what's already
+	 * configured, for a site owner answering a security questionnaire.
+	 *
+	 * @return array<array{label:string,passed:bool}>
+	 */
+	private function compliance_checklist() {
+		$login_throttle = IS_Login::throttle_settings();
+		$rest_api       = IS_Rest_API::settings();
+		$ip_list        = IS_IP_List::settings();
+		$headers        = IS_Headers::settings();
+		$headers_score  = IS_Headers::audit_score( $headers );
+		$sessions       = IS_Sessions::settings();
+
+		$csp_enforced = false;
+		foreach ( $headers_score['items'] as $item ) {
+			if ( 'csp_enforced' === $item['key'] ) {
+				$csp_enforced = $item['passed'];
+				break;
+			}
+		}
+
+		return array(
+			array(
+				'label'  => __( 'Two-factor authentication enforced for at least one role', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_2FA::settings()['enforced_roles'] ),
+			),
+			array(
+				'label'  => __( 'Password strength policy enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_Password_Policy::settings()['enabled'] ),
+			),
+			array(
+				'label'  => __( 'Login brute-force / credential-stuffing protection enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( $login_throttle['enabled'] ),
+			),
+			array(
+				'label'  => __( 'REST API rate limiting enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( $rest_api['rate_limit'] ),
+			),
+			array(
+				'label'  => __( 'REST API enumeration detection enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( $rest_api['enumeration_detection'] ),
+			),
+			array(
+				'label'  => __( 'IP access control configured (allow or deny list in use)', 'integrity-sentinel' ),
+				'passed' => '' !== trim( $ip_list['whitelist'] . $ip_list['blacklist'] ),
+			),
+			array(
+				'label'  => __( 'Deception (honeypots / canary token) enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_Deception::settings()['enabled'] ),
+			),
+			array(
+				'label'  => __( 'Security response headers enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( $headers['security_headers'] ),
+			),
+			array(
+				'label'  => __( 'Content-Security-Policy enforced', 'integrity-sentinel' ),
+				'passed' => $csp_enforced,
+			),
+			array(
+				'label'  => __( 'WordPress version disclosure hidden', 'integrity-sentinel' ),
+				'passed' => ! empty( $headers['hide_wp_version'] ),
+			),
+			array(
+				'label'  => __( 'Known-vulnerability (CVE) scanning enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_Vulnerability_Scanner::settings()['enabled'] ),
+			),
+			array(
+				'label'  => __( 'Exact-hash signature scanning enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_Signatures::settings()['enabled'] ),
+			),
+			array(
+				'label'  => __( 'Threat-intelligence reputation lookups configured', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_Threat_Intel::settings()['enabled'] ),
+			),
+			array(
+				'label'  => __( 'PHP execution blocked in the uploads directory', 'integrity-sentinel' ),
+				'passed' => IS_Hardening::uploads_block_active(),
+			),
+			array(
+				'label'  => __( 'Hotlink protection applied', 'integrity-sentinel' ),
+				'passed' => IS_Hotlink::active(),
+			),
+			array(
+				'label'  => __( 'WordPress asset paths cloaked', 'integrity-sentinel' ),
+				'passed' => IS_Asset_Cloak::block_active(),
+			),
+			array(
+				'label'  => __( 'Session impossible-travel anomaly detection enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( $sessions['impossible_travel_detection'] ),
+			),
+			array(
+				'label'  => __( 'Append-only audit logging active', 'integrity-sentinel' ),
+				'passed' => true, // always-on core feature of this plugin
+			),
+		);
+	}
+
+	public function render_reports() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$headers_settings = IS_Headers::settings();
+		$headers_score    = IS_Headers::audit_score( $headers_settings );
+		$checklist        = $this->compliance_checklist();
+
+		$domain = isset( $_GET['is_email_domain'] ) ? sanitize_text_field( wp_unslash( $_GET['is_email_domain'] ) ) : IS_Email_Auth::site_domain(); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only lookup, not a state change
+		$email  = IS_Email_Auth::check_domain( $domain );
+
+		$this->render_shell_open( 'reports' );
+		?>
+		<div class="wrap is-wrap">
+			<h1><?php esc_html_e( 'Reports & Compliance', 'integrity-sentinel' ); ?></h1>
+			<p class="description"><?php esc_html_e( 'A single-page summary of this plugin\'s own configuration, for answering a security questionnaire or a quick self-check — nothing here is tracked separately from the settings already configured elsewhere in the plugin.', 'integrity-sentinel' ); ?></p>
+
+			<h2><?php esc_html_e( 'Security headers score', 'integrity-sentinel' ); ?></h2>
+			<p>
+				<strong><?php echo esc_html( sprintf( /* translators: 1: passed count, 2: total count */ __( '%1$d / %2$d', 'integrity-sentinel' ), $headers_score['score'], $headers_score['max'] ) ); ?></strong>
+				— <a href="<?php echo esc_url( admin_url( 'admin.php?page=integrity-sentinel-hardening' ) ); ?>"><?php esc_html_e( 'adjust under Hardening', 'integrity-sentinel' ); ?></a>
+			</p>
+			<ul>
+				<?php foreach ( $headers_score['items'] as $item ) : ?>
+					<li><?php echo $item['passed'] ? '✅' : '⬜'; ?> <?php echo esc_html( $item['label'] ); ?></li>
+				<?php endforeach; ?>
+			</ul>
+
+			<h2><?php esc_html_e( 'Email authentication (SPF / DMARC / DKIM)', 'integrity-sentinel' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'Local DNS lookups only — no third-party service, no key required. DKIM has no fixed DNS location, so this tries a handful of common selectors; a miss means "not found under a common selector", not "definitely absent".', 'integrity-sentinel' ); ?></p>
+			<form method="get" action="<?php echo esc_url( admin_url( 'admin.php' ) ); ?>">
+				<input type="hidden" name="page" value="integrity-sentinel-reports">
+				<label for="is_email_domain"><?php esc_html_e( 'Domain', 'integrity-sentinel' ); ?></label>
+				<input type="text" id="is_email_domain" name="is_email_domain" value="<?php echo esc_attr( $domain ); ?>" class="regular-text">
+				<?php submit_button( __( 'Check', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+			</form>
+			<ul>
+				<li><?php echo $email['spf'] ? '✅' : '⬜'; ?> <?php esc_html_e( 'SPF record found', 'integrity-sentinel' ); ?></li>
+				<li>
+					<?php echo $email['dmarc'] ? '✅' : '⬜'; ?> <?php esc_html_e( 'DMARC record found', 'integrity-sentinel' ); ?>
+					<?php if ( $email['dmarc'] && $email['dmarc_policy'] ) : ?>
+						(<?php echo esc_html( $email['dmarc_policy'] ); ?>)
+					<?php endif; ?>
+				</li>
+				<li>
+					<?php echo $email['dkim'] ? '✅' : '⬜'; ?> <?php esc_html_e( 'DKIM record found', 'integrity-sentinel' ); ?>
+					<?php if ( $email['dkim'] ) : ?>
+						(<?php echo esc_html( $email['dkim_selector'] ); ?>._domainkey)
+					<?php endif; ?>
+				</li>
+			</ul>
+
+			<h2><?php esc_html_e( 'Compliance checklist', 'integrity-sentinel' ); ?></h2>
+			<ul>
+				<?php foreach ( $checklist as $item ) : ?>
+					<li><?php echo $item['passed'] ? '✅' : '⬜'; ?> <?php echo esc_html( $item['label'] ); ?></li>
+				<?php endforeach; ?>
+			</ul>
+
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<?php wp_nonce_field( 'is_reports_action' ); ?>
+				<input type="hidden" name="action" value="is_export_compliance_report">
+				<?php submit_button( __( 'Export report (Markdown)', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+			</form>
+		</div>
+		<?php
+		$this->render_shell_close();
+	}
+
+	public function handle_export_compliance_report() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
+		}
+		check_admin_referer( 'is_reports_action' );
+
+		$headers_score = IS_Headers::audit_score( IS_Headers::settings() );
+		$email         = IS_Email_Auth::check_domain( IS_Email_Auth::site_domain() );
+		$checklist     = $this->compliance_checklist();
+
+		$lines   = array();
+		$lines[] = '# ' . sprintf( /* translators: %s: site name */ __( 'Integrity Sentinel report — %s', 'integrity-sentinel' ), wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES ) );
+		$lines[] = '_' . gmdate( 'Y-m-d H:i' ) . ' UTC_';
+		$lines[] = '';
+		$lines[] = '## ' . __( 'Security headers score', 'integrity-sentinel' ) . ' — ' . $headers_score['score'] . '/' . $headers_score['max'];
+		foreach ( $headers_score['items'] as $item ) {
+			$lines[] = '- [' . ( $item['passed'] ? 'x' : ' ' ) . '] ' . $item['label'];
+		}
+		$lines[] = '';
+		$lines[] = '## ' . __( 'Email authentication', 'integrity-sentinel' ) . ' (' . $email['domain'] . ')';
+		$lines[] = '- [' . ( $email['spf'] ? 'x' : ' ' ) . '] SPF';
+		$lines[] = '- [' . ( $email['dmarc'] ? 'x' : ' ' ) . '] DMARC' . ( $email['dmarc'] && $email['dmarc_policy'] ? ' (' . $email['dmarc_policy'] . ')' : '' );
+		$lines[] = '- [' . ( $email['dkim'] ? 'x' : ' ' ) . '] DKIM' . ( $email['dkim'] ? ' (' . $email['dkim_selector'] . '._domainkey)' : '' );
+		$lines[] = '';
+		$lines[] = '## ' . __( 'Compliance checklist', 'integrity-sentinel' );
+		foreach ( $checklist as $item ) {
+			$lines[] = '- [' . ( $item['passed'] ? 'x' : ' ' ) . '] ' . $item['label'];
+		}
+
+		nocache_headers();
+		header( 'Content-Type: text/markdown; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename="integrity-sentinel-report-' . gmdate( 'Y-m-d' ) . '.md"' );
+		echo implode( "\n", $lines ) . "\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- plain-text Markdown file download, not HTML output
+		exit;
 	}
 
 	// -----------------------------------------------------------------

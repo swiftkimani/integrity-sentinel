@@ -378,10 +378,11 @@ a.is-404-button:hover{opacity:.88;}
 
 	public static function default_throttle_settings() {
 		return array(
-			'enabled'         => 1,
-			'max_attempts'    => 5,
-			'window_minutes'  => 15,
-			'lockout_minutes' => 15,
+			'enabled'                       => 1,
+			'max_attempts'                  => 5,
+			'window_minutes'                => 15,
+			'lockout_minutes'               => 15,
+			'credential_stuffing_threshold' => 8,
 		);
 	}
 
@@ -438,8 +439,44 @@ a.is-404-button:hover{opacity:.88;}
 		);
 	}
 
+	/**
+	 * Pure: the default shape of a per-IP distinct-username tracker --
+	 * a rolling set (unique, order-preserving) of usernames tried from
+	 * one IP. Time-windowing is handled by the transient's own TTL
+	 * rather than per-entry timestamps, since the set only ever needs to
+	 * answer "how many distinct usernames in the current window", not
+	 * "which ones and when".
+	 */
+	public static function default_username_record() {
+		return array( 'usernames' => array() );
+	}
+
+	public static function record_username_attempt( array $record, $username ) {
+		$usernames = isset( $record['usernames'] ) ? (array) $record['usernames'] : array();
+		$username  = trim( (string) $username );
+		if ( '' !== $username && ! in_array( $username, $usernames, true ) ) {
+			$usernames[] = $username;
+		}
+		return array( 'usernames' => $usernames );
+	}
+
+	/**
+	 * Pure: credential stuffing shows up as many DISTINCT usernames
+	 * tried from one IP, unlike a simple brute force against one
+	 * account (which the ordinary failure-count lockout above already
+	 * handles) -- this is the complementary signal.
+	 */
+	public static function is_credential_stuffing( array $record, $threshold ) {
+		$usernames = isset( $record['usernames'] ) ? (array) $record['usernames'] : array();
+		return count( $usernames ) >= max( 2, (int) $threshold );
+	}
+
 	private static function transient_key( $ip ) {
 		return 'is_login_attempts_' . md5( $ip );
+	}
+
+	private static function username_transient_key( $ip ) {
+		return 'is_login_usernames_' . md5( $ip );
 	}
 
 	private static function attempt_record( $ip ) {
@@ -454,7 +491,7 @@ a.is-404-button:hover{opacity:.88;}
 	public function on_login_failed( $username ) {
 		IS_Guard::run(
 			'login_rate_limit',
-			function () {
+			function () use ( $username ) {
 				$settings = self::throttle_settings();
 				if ( empty( $settings['enabled'] ) || IS_IP_List::is_whitelisted() ) {
 					return;
@@ -499,6 +536,35 @@ a.is-404-button:hover{opacity:.88;}
 								$settings['lockout_minutes']
 							),
 							__( 'If this is you, wait for the lockout to expire or ask an administrator to add your IP to the Access Control whitelist.', 'integrity-sentinel' ),
+						)
+					);
+				}
+
+				// Credential stuffing: many DISTINCT usernames from one IP,
+				// a different shape than the single-account brute force
+				// the counter above already locks out. Tracked separately
+				// so it fires (and escalates the lockout) even for an
+				// attacker deliberately staying under the per-account
+				// failure threshold by trying each username only once or
+				// twice before moving on.
+				$username_key    = self::username_transient_key( $ip );
+				$username_record = get_transient( $username_key );
+				$username_record = is_array( $username_record ) ? $username_record : self::default_username_record();
+				$username_record = self::record_username_attempt( $username_record, $username );
+				set_transient( $username_key, $username_record, $window_seconds );
+
+				if ( self::is_credential_stuffing( $username_record, $settings['credential_stuffing_threshold'] ) ) {
+					$stuffing_record                = self::attempt_record( $ip );
+					$stuffing_record['locked_until'] = time() + $lockout_seconds;
+					self::persist_attempt_record( $ip, $stuffing_record, $lockout_seconds );
+					delete_transient( $username_key );
+
+					IS_Detections::fire(
+						'credential_stuffing_detected',
+						array(
+							'ip'        => $ip,
+							'usernames' => count( $username_record['usernames'] ),
+							'minutes'   => $settings['lockout_minutes'],
 						)
 					);
 				}

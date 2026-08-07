@@ -460,6 +460,10 @@ class IS_Admin {
 			'block_user_enumeration'   => empty( $input['block_user_enumeration'] ) ? 0 : 1,
 			'restrict_unauthenticated' => empty( $input['restrict_unauthenticated'] ) ? 0 : 1,
 			'allowed_routes'           => sanitize_textarea_field( $input['allowed_routes'] ?? '' ),
+			'rate_limit'               => max( 0, min( 10000, (int) ( $input['rate_limit'] ?? 120 ) ) ),
+			'enumeration_detection'    => empty( $input['enumeration_detection'] ) ? 0 : 1,
+			'enumeration_threshold'    => max( 5, min( 1000, (int) ( $input['enumeration_threshold'] ?? 20 ) ) ),
+			'block_on_enumeration'     => empty( $input['block_on_enumeration'] ) ? 0 : 1,
 		);
 
 		$changed = array();
@@ -692,10 +696,11 @@ class IS_Admin {
 	public function sanitize_login_throttle_settings( $input ) {
 		$old = IS_Login::throttle_settings();
 		$out = array(
-			'enabled'         => empty( $input['enabled'] ) ? 0 : 1,
-			'max_attempts'    => max( 3, min( 20, (int) ( $input['max_attempts'] ?? 5 ) ) ),
-			'window_minutes'  => max( 1, min( 1440, (int) ( $input['window_minutes'] ?? 15 ) ) ),
-			'lockout_minutes' => max( 1, min( 1440, (int) ( $input['lockout_minutes'] ?? 15 ) ) ),
+			'enabled'                       => empty( $input['enabled'] ) ? 0 : 1,
+			'max_attempts'                  => max( 3, min( 20, (int) ( $input['max_attempts'] ?? 5 ) ) ),
+			'window_minutes'                => max( 1, min( 1440, (int) ( $input['window_minutes'] ?? 15 ) ) ),
+			'lockout_minutes'               => max( 1, min( 1440, (int) ( $input['lockout_minutes'] ?? 15 ) ) ),
+			'credential_stuffing_threshold' => max( 2, min( 100, (int) ( $input['credential_stuffing_threshold'] ?? 8 ) ) ),
 		);
 
 		$changed = array();
@@ -2150,6 +2155,13 @@ class IS_Admin {
 						<th scope="row"><label for="is_lockout_minutes"><?php esc_html_e( 'Lockout duration (minutes)', 'integrity-sentinel' ); ?></label></th>
 						<td><input type="number" min="1" max="1440" id="is_lockout_minutes" name="is_login_throttle_settings[lockout_minutes]" value="<?php echo esc_attr( $throttle['lockout_minutes'] ); ?>" class="small-text"></td>
 					</tr>
+					<tr>
+						<th scope="row"><label for="is_credential_stuffing_threshold"><?php esc_html_e( 'Credential stuffing threshold (distinct usernames)', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<input type="number" min="2" max="100" id="is_credential_stuffing_threshold" name="is_login_throttle_settings[credential_stuffing_threshold]" value="<?php echo esc_attr( $throttle['credential_stuffing_threshold'] ); ?>" class="small-text">
+							<p class="description"><?php esc_html_e( 'If one IP tries this many different usernames within the window above, it\'s treated as credential stuffing (not just a brute force against one account) and locked out immediately.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
 				</table>
 				<?php submit_button( __( 'Save rate limiting settings', 'integrity-sentinel' ) ); ?>
 			</form>
@@ -2529,6 +2541,40 @@ class IS_Admin {
 						<td>
 							<textarea id="is_rest_allowed_routes" name="is_rest_api_settings[allowed_routes]" rows="4" class="large-text code"><?php echo esc_textarea( $api['allowed_routes'] ); ?></textarea>
 							<p class="description"><?php esc_html_e( 'One route prefix per line (e.g. wp/v2/oembed). Only used when restriction above is enabled. This plugin\'s own endpoint below is always allowed — it enforces its own authentication.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+
+				<h3><?php esc_html_e( 'Rate limiting & abuse detection', 'integrity-sentinel' ); ?></h3>
+				<p class="description"><?php esc_html_e( 'Applies to every REST API route, not just this plugin\'s own endpoints. Whitelisted IPs (Access Control) always bypass these.', 'integrity-sentinel' ); ?></p>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="is_rest_rate_limit"><?php esc_html_e( 'Rate limit (requests per 5 minutes, per IP)', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<input type="number" min="0" max="10000" id="is_rest_rate_limit" name="is_rest_api_settings[rate_limit]" value="<?php echo esc_attr( $api['rate_limit'] ); ?>" class="small-text">
+							<p class="description"><?php esc_html_e( '0 disables rate limiting entirely.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Enumeration detection', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_rest_api_settings[enumeration_detection]" value="1" <?php checked( $api['enumeration_detection'], 1 ); ?>>
+								<?php esc_html_e( 'Log a detection when one IP requests many sequential numeric-ID objects (e.g. /wp/v2/posts/1, /2, /3, …) — a common scanner pattern.', 'integrity-sentinel' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_rest_enumeration_threshold"><?php esc_html_e( 'Enumeration threshold (per 5 minutes, per IP)', 'integrity-sentinel' ); ?></label></th>
+						<td><input type="number" min="5" max="1000" id="is_rest_enumeration_threshold" name="is_rest_api_settings[enumeration_threshold]" value="<?php echo esc_attr( $api['enumeration_threshold'] ); ?>" class="small-text"></td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Block on enumeration', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_rest_api_settings[block_on_enumeration]" value="1" <?php checked( $api['block_on_enumeration'], 1 ); ?>>
+								<?php esc_html_e( 'Also reject requests once the threshold is crossed, instead of only logging. Off by default — a very active legitimate integration could plausibly trip this.', 'integrity-sentinel' ); ?>
+							</label>
 						</td>
 					</tr>
 				</table>

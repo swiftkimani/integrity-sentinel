@@ -36,4 +36,31 @@ class RestApiTest extends TestCase {
 	public function test_parse_route_list_ignores_blank_lines() {
 		$this->assertSame( array( 'wp/v2/oembed', 'contact-form-7/v1' ), IS_Rest_API::parse_route_list( "wp/v2/oembed\n\ncontact-form-7/v1\n" ) );
 	}
+
+	// ---- numeric_id_route_match (enumeration detection) --------------------
+
+	public function test_matches_a_single_numeric_id_route() {
+		$match = IS_Rest_API::numeric_id_route_match( '/wp/v2/posts/42' );
+		$this->assertSame( array( 'type' => 'posts', 'id' => 42 ), $match );
+	}
+
+	public function test_matches_every_covered_collection() {
+		foreach ( array( 'posts', 'pages', 'users', 'comments', 'media' ) as $type ) {
+			$match = IS_Rest_API::numeric_id_route_match( "/wp/v2/{$type}/7" );
+			$this->assertSame( $type, $match['type'] );
+			$this->assertSame( 7, $match['id'] );
+		}
+	}
+
+	public function test_does_not_match_a_collection_route_without_an_id() {
+		$this->assertNull( IS_Rest_API::numeric_id_route_match( '/wp/v2/posts' ) );
+	}
+
+	public function test_does_not_match_a_non_numeric_slug() {
+		$this->assertNull( IS_Rest_API::numeric_id_route_match( '/wp/v2/posts/my-post-slug' ) );
+	}
+
+	public function test_does_not_match_unrelated_namespaces() {
+		$this->assertNull( IS_Rest_API::numeric_id_route_match( '/integrity-sentinel/v1/posts/1' ) );
+	}
 }

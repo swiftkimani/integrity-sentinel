@@ -76,6 +76,14 @@ class IS_IP_List {
 						array( 'response' => 403 )
 					);
 				}
+				if ( self::is_temp_banned( $ip ) ) {
+					IS_Audit_Log::record( 'ip_temp_banned_blocked', array( 'ip' => $ip ) );
+					wp_die(
+						esc_html__( 'Access denied.', 'integrity-sentinel' ),
+						'',
+						array( 'response' => 403 )
+					);
+				}
 			}
 		);
 	}
@@ -191,9 +199,57 @@ class IS_IP_List {
 		return false !== $candidate_bin ? $candidate : $remote_addr;
 	}
 
+	/**
+	 * Temporary bans: a programmatic, expiring counterpart to the static
+	 * admin-edited blacklist above. Nothing in this class writes one
+	 * itself; other modules (IS_Deception's honeypots/canary token,
+	 * future automated-response features) call temp_ban() when they
+	 * catch something the static blacklist was never meant to cover.
+	 */
+	public static function default_ban_record() {
+		return array(
+			'banned_until' => null,
+			'reason'       => '',
+		);
+	}
+
+	/** Pure: is a ban record currently in effect? */
+	public static function is_ban_active( array $record, $now ) {
+		return ! empty( $record['banned_until'] ) && $record['banned_until'] > $now;
+	}
+
 	// -----------------------------------------------------------------
 	// WP-dependent glue
 	// -----------------------------------------------------------------
+
+	private static function ban_transient_key( $ip ) {
+		return 'is_ip_temp_ban_' . md5( (string) $ip );
+	}
+
+	/**
+	 * @param string $ip
+	 * @param string $reason           Short machine-readable reason, stored for the admin's benefit -- never shown to the banned visitor.
+	 * @param int    $duration_seconds
+	 */
+	public static function temp_ban( $ip, $reason, $duration_seconds ) {
+		$duration_seconds = max( MINUTE_IN_SECONDS, (int) $duration_seconds );
+		$record           = array(
+			'banned_until' => time() + $duration_seconds,
+			'reason'       => (string) $reason,
+		);
+		set_transient( self::ban_transient_key( $ip ), $record, $duration_seconds );
+		return $record;
+	}
+
+	public static function is_temp_banned( $ip = null ) {
+		$ip = null === $ip ? self::client_ip() : $ip;
+		if ( '' === $ip ) {
+			return false;
+		}
+		$record = get_transient( self::ban_transient_key( $ip ) );
+		$record = is_array( $record ) ? wp_parse_args( $record, self::default_ban_record() ) : self::default_ban_record();
+		return self::is_ban_active( $record, time() );
+	}
 
 	public static function client_ip() {
 		if ( null === self::$client_ip_cache ) {

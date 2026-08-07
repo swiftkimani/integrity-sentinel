@@ -63,6 +63,20 @@ class IS_Audit_Log {
 		);
 	}
 
+	/** Same as entries(), filtered to one exact action slug -- used for small "recent triggers" lists (e.g. deception detections). */
+	public static function entries_for_action( $action, $limit = 20 ) {
+		global $wpdb;
+		$table = IS_DB::instance()->audit_table();
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM {$table} WHERE action = %s ORDER BY id DESC LIMIT %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$action,
+				max( 1, (int) $limit )
+			),
+			ARRAY_A
+		);
+	}
+
 	public static function count() {
 		global $wpdb;
 		$table = IS_DB::instance()->audit_table();

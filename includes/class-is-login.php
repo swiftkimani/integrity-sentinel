@@ -554,7 +554,7 @@ a.is-404-button:hover{opacity:.88;}
 				set_transient( $username_key, $username_record, $window_seconds );
 
 				if ( self::is_credential_stuffing( $username_record, $settings['credential_stuffing_threshold'] ) ) {
-					$stuffing_record                = self::attempt_record( $ip );
+					$stuffing_record                 = self::attempt_record( $ip );
 					$stuffing_record['locked_until'] = time() + $lockout_seconds;
 					self::persist_attempt_record( $ip, $stuffing_record, $lockout_seconds );
 					delete_transient( $username_key );

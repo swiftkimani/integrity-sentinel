@@ -32,6 +32,9 @@ class IS_Admin {
 		add_action( 'admin_post_is_quarantine_finding', array( $this, 'handle_quarantine_finding' ) );
 		add_action( 'admin_post_is_quarantine_restore', array( $this, 'handle_quarantine_restore' ) );
 		add_action( 'admin_post_is_quarantine_delete', array( $this, 'handle_quarantine_delete' ) );
+		add_action( 'admin_post_is_check_ip_reputation', array( $this, 'handle_check_ip_reputation' ) );
+		add_action( 'admin_post_is_check_hash_reputation', array( $this, 'handle_check_hash_reputation' ) );
+		add_action( 'admin_post_is_download_sbom', array( $this, 'handle_download_sbom' ) );
 	}
 
 	public function add_menu() {
@@ -342,6 +345,22 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_vulnerability_scanner_settings' ),
 			)
 		);
+		register_setting(
+			'is_signatures_settings_group',
+			'is_signatures_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_signatures_settings' ),
+			)
+		);
+		register_setting(
+			'is_threat_intel_settings_group',
+			'is_threat_intel_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_threat_intel_settings' ),
+			)
+		);
 	}
 
 	public function sanitize_vulnerability_scanner_settings( $input ) {
@@ -366,6 +385,42 @@ class IS_Admin {
 		if ( $out !== $old ) {
 			// The key itself isn't logged -- only whether the feature's on.
 			IS_Audit_Log::record( 'vulnerability_scanner_settings_changed', array( 'enabled' => $out['enabled'] ) );
+		}
+
+		return $out;
+	}
+
+	public function sanitize_signatures_settings( $input ) {
+		$old = IS_Signatures::settings();
+		$out = array(
+			'enabled' => empty( $input['enabled'] ) ? 0 : 1,
+			'hashes'  => sanitize_textarea_field( $input['hashes'] ?? '' ),
+		);
+
+		if ( $out !== $old ) {
+			IS_Audit_Log::record(
+				'signatures_settings_changed',
+				array(
+					'enabled' => $out['enabled'],
+					'count'   => count( IS_Signatures::parse_hash_list( $out['hashes'] ) ),
+				)
+			);
+		}
+
+		return $out;
+	}
+
+	public function sanitize_threat_intel_settings( $input ) {
+		$old = IS_Threat_Intel::settings();
+		$out = array(
+			'enabled'        => empty( $input['enabled'] ) ? 0 : 1,
+			'abuseipdb_key'  => isset( $input['abuseipdb_key'] ) ? sanitize_text_field( trim( (string) $input['abuseipdb_key'] ) ) : '',
+			'virustotal_key' => isset( $input['virustotal_key'] ) ? sanitize_text_field( trim( (string) $input['virustotal_key'] ) ) : '',
+		);
+
+		if ( $out['enabled'] !== $old['enabled'] ) {
+			// The keys themselves aren't logged -- only whether the feature's on.
+			IS_Audit_Log::record( 'threat_intel_settings_changed', array( 'enabled' => $out['enabled'] ) );
 		}
 
 		return $out;
@@ -657,19 +712,19 @@ class IS_Admin {
 		$hero_gallery = array_slice( array_values( array_unique( $hero_gallery ) ), 0, 8 );
 
 		return array(
-			'template'        => $template,
-			'logo_url'        => $logo,
-			'primary_color'   => $color,
-			'border_radius'   => IS_Login_Design::clamp_radius( isset( $input['border_radius'] ) ? $input['border_radius'] : $defaults['border_radius'] ),
-			'hero_position'   => $hero_position,
-			'hero_heading'    => isset( $input['hero_heading'] ) ? sanitize_text_field( $input['hero_heading'] ) : '',
-			'hero_subheading' => isset( $input['hero_subheading'] ) ? sanitize_text_field( $input['hero_subheading'] ) : '',
-			'hero_image_url'  => $hero_image,
-			'hero_gallery'    => $hero_gallery,
+			'template'           => $template,
+			'logo_url'           => $logo,
+			'primary_color'      => $color,
+			'border_radius'      => IS_Login_Design::clamp_radius( isset( $input['border_radius'] ) ? $input['border_radius'] : $defaults['border_radius'] ),
+			'hero_position'      => $hero_position,
+			'hero_heading'       => isset( $input['hero_heading'] ) ? sanitize_text_field( $input['hero_heading'] ) : '',
+			'hero_subheading'    => isset( $input['hero_subheading'] ) ? sanitize_text_field( $input['hero_subheading'] ) : '',
+			'hero_image_url'     => $hero_image,
+			'hero_gallery'       => $hero_gallery,
 			'carousel_indicator' => $carousel_indicator,
-			'hide_branding'   => empty( $input['hide_branding'] ) ? 0 : 1,
-			'custom_css'      => IS_Login_Design::sanitize_css_for_style_tag( isset( $input['custom_css'] ) ? (string) $input['custom_css'] : '' ),
-			'custom_html'     => isset( $input['custom_html'] ) ? wp_kses_post( $input['custom_html'] ) : '',
+			'hide_branding'      => empty( $input['hide_branding'] ) ? 0 : 1,
+			'custom_css'         => IS_Login_Design::sanitize_css_for_style_tag( isset( $input['custom_css'] ) ? (string) $input['custom_css'] : '' ),
+			'custom_html'        => isset( $input['custom_html'] ) ? wp_kses_post( $input['custom_html'] ) : '',
 		);
 	}
 
@@ -995,6 +1050,94 @@ class IS_Admin {
 	}
 
 	// -----------------------------------------------------------------
+	// Threat intelligence: on-demand reputation checks + SBOM download
+	// -----------------------------------------------------------------
+
+	private function guard_threat_intel_action() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
+		}
+		check_admin_referer( 'is_threat_intel_action' );
+	}
+
+	/**
+	 * Runs on the admin's explicit click, from the Audit Log page --
+	 * unlike a live login/REST request, a page load taking an extra
+	 * second for one external HTTP round-trip is an acceptable, expected
+	 * cost here. See IS_Threat_Intel's class doc for why this is never
+	 * wired into a live request path instead.
+	 */
+	public function handle_check_ip_reputation() {
+		$this->guard_threat_intel_action();
+		$ip  = isset( $_POST['ip'] ) ? sanitize_text_field( wp_unslash( $_POST['ip'] ) ) : '';
+		$url = admin_url( 'admin.php?page=integrity-sentinel-audit' );
+
+		if ( '' === $ip || false === filter_var( $ip, FILTER_VALIDATE_IP ) ) {
+			wp_safe_redirect( add_query_arg( 'is_error', rawurlencode( __( 'Invalid IP address.', 'integrity-sentinel' ) ), $url ) );
+			exit;
+		}
+
+		$result = ( new IS_Threat_Intel() )->lookup_ip( $ip );
+		if ( is_wp_error( $result ) ) {
+			$url = add_query_arg( 'is_error', rawurlencode( $result->get_error_message() ), $url );
+		} else {
+			IS_Audit_Log::record( 'threat_intel_ip_checked', array_merge( array( 'ip' => $ip ), $result ) );
+			$summary = sprintf(
+				/* translators: 1: IP address, 2: AbuseIPDB confidence score 0-100, 3: total report count */
+				__( 'AbuseIPDB: %1$s scored %2$d/100 (%3$d reports).', 'integrity-sentinel' ),
+				$ip,
+				$result['score'],
+				$result['total_reports']
+			);
+			$url = add_query_arg( 'is_ti_result', rawurlencode( $summary ), $url );
+		}
+		wp_safe_redirect( $url );
+		exit;
+	}
+
+	public function handle_check_hash_reputation() {
+		$this->guard_threat_intel_action();
+		$finding_id = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0;
+		$finding    = $finding_id ? IS_DB::instance()->get_finding( $finding_id ) : null;
+		$url        = admin_url( 'admin.php?page=integrity-sentinel-findings' );
+
+		if ( ! $finding || empty( $finding['file_hash'] ) ) {
+			wp_safe_redirect( add_query_arg( 'is_error', rawurlencode( __( 'This finding has no file hash to check.', 'integrity-sentinel' ) ), $url ) );
+			exit;
+		}
+
+		$result = ( new IS_Threat_Intel() )->lookup_hash( $finding['file_hash'] );
+		if ( is_wp_error( $result ) ) {
+			$url = add_query_arg( 'is_error', rawurlencode( $result->get_error_message() ), $url );
+		} else {
+			IS_Audit_Log::record( 'threat_intel_hash_checked', array_merge( array( 'finding_id' => $finding_id ), $result ) );
+			$summary = ! empty( $result['unknown'] )
+				? __( 'VirusTotal: this hash is not in their database.', 'integrity-sentinel' )
+				: sprintf(
+					/* translators: 1: number of engines flagging as malicious, 2: number flagging as suspicious */
+					__( 'VirusTotal: %1$d engine(s) flagged this as malicious, %2$d as suspicious.', 'integrity-sentinel' ),
+					$result['malicious'],
+					$result['suspicious']
+				);
+			$url = add_query_arg( 'is_ti_result', rawurlencode( $summary ), $url );
+		}
+		wp_safe_redirect( $url );
+		exit;
+	}
+
+	/** Streams the current software inventory as a JSON download -- not a redirect, since there's nothing to redirect back to. */
+	public function handle_download_sbom() {
+		$this->guard_threat_intel_action();
+		$document = IS_SBOM::to_document( IS_SBOM::generate() );
+
+		nocache_headers();
+		header( 'Content-Type: application/json; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename="integrity-sentinel-sbom-' . gmdate( 'Y-m-d' ) . '.json"' );
+		echo wp_json_encode( $document, JSON_PRETTY_PRINT );
+		exit;
+	}
+
+	// -----------------------------------------------------------------
 	// Dashboard
 	// -----------------------------------------------------------------
 
@@ -1311,21 +1454,27 @@ class IS_Admin {
 			'offset'   => ( $paged - 1 ) * $per_page,
 		);
 
-		$findings = $db->get_findings( $args );
-		$total    = $db->count_findings(
+		$findings    = $db->get_findings( $args );
+		$total       = $db->count_findings(
 			array(
 				'status'   => $args['status'],
 				'severity' => $severity,
 			)
 		);
-		$pages    = max( 1, (int) ceil( $total / $per_page ) );
-		$error    = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$pages       = max( 1, (int) ceil( $total / $per_page ) );
+		$error       = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$ti_result   = isset( $_GET['is_ti_result'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_ti_result'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$ti_settings = IS_Threat_Intel::settings();
+		$ti_ready    = ! empty( $ti_settings['enabled'] ) && '' !== trim( (string) $ti_settings['virustotal_key'] );
 		$this->render_shell_open( 'findings' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Findings', 'integrity-sentinel' ); ?></h1>
 			<?php if ( $error ) : ?>
 				<div class="notice notice-error"><p><?php echo esc_html( $error ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( $ti_result ) : ?>
+				<div class="notice notice-info"><p><?php echo esc_html( $ti_result ); ?></p></div>
 			<?php endif; ?>
 			<?php if ( isset( $_GET['is_quarantined'] ) ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only flag from our own redirect ?>
 				<div class="notice notice-success"><p><?php esc_html_e( 'File moved to quarantine. It has not been deleted — review it under Quarantine.', 'integrity-sentinel' ); ?></p></div>
@@ -1399,6 +1548,15 @@ class IS_Admin {
 									<?php endif; ?>
 								<?php else : ?>
 									<em><?php echo esc_html( ucfirst( $f['status'] ) ); ?></em>
+								<?php endif; ?>
+								<?php if ( $ti_ready && ! empty( $f['file_hash'] ) ) : ?>
+									|
+									<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+										<?php wp_nonce_field( 'is_threat_intel_action' ); ?>
+										<input type="hidden" name="action" value="is_check_hash_reputation">
+										<input type="hidden" name="finding_id" value="<?php echo esc_attr( $f['id'] ); ?>">
+										<button type="submit" class="button-link"><?php esc_html_e( 'Check reputation', 'integrity-sentinel' ); ?></button>
+									</form>
 								<?php endif; ?>
 							</td>
 						</tr>
@@ -1623,6 +1781,10 @@ class IS_Admin {
 			<?php $this->render_asset_cloak_section(); ?>
 
 			<?php $this->render_vulnerability_scanner_section(); ?>
+
+			<?php $this->render_signatures_section(); ?>
+
+			<?php $this->render_threat_intel_section(); ?>
 
 			<h2><?php esc_html_e( 'Hardening checks', 'integrity-sentinel' ); ?></h2>
 			<p>
@@ -1961,6 +2123,130 @@ class IS_Admin {
 				</tr>
 			</table>
 			<?php submit_button( __( 'Save vulnerability scanning settings', 'integrity-sentinel' ) ); ?>
+		</form>
+		<?php
+	}
+
+	/**
+	 * Exact-hash signature matching against an admin-curated known-bad-
+	 * hash list -- see IS_Signatures's class doc for why this ships
+	 * empty rather than with a bundled hash database.
+	 */
+	private function render_signatures_section() {
+		$settings = IS_Signatures::settings();
+		?>
+		<h2><?php esc_html_e( 'Known-bad file hashes', 'integrity-sentinel' ); ?></h2>
+		<p>
+			<?php esc_html_e( 'Checks every scanned file\'s SHA-256 hash against a list you maintain — paste in hashes gathered from an incident write-up, a threat-intel feed, or a VirusTotal/MalwareBazaar report. An exact match is a certain finding, not a guess, so this complements (not replaces) the pattern-based heuristic scan above.', 'integrity-sentinel' ); ?>
+		</p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_signatures_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_signatures_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Check file hashes against the list below on every scan.', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="is_signature_hashes"><?php esc_html_e( 'Known-bad SHA-256 hashes', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<textarea id="is_signature_hashes" name="is_signatures_settings[hashes]" rows="6" class="large-text code" placeholder="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  # optional label"><?php echo esc_textarea( $settings['hashes'] ); ?></textarea>
+						<p class="description"><?php esc_html_e( 'One SHA-256 hash per line, with an optional "# label" after it. Malformed lines are ignored.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save signature settings', 'integrity-sentinel' ) ); ?>
+		</form>
+		<?php
+	}
+
+	/**
+	 * Opt-in reputation lookups (IP/hash) plus the software inventory
+	 * (SBOM) download -- see IS_Threat_Intel and IS_SBOM's class docs.
+	 * Lookups themselves happen from "Check reputation" links on the
+	 * Audit Log and Findings pages, not from here.
+	 */
+	private function render_threat_intel_section() {
+		$settings = IS_Threat_Intel::settings();
+		?>
+		<h2><?php esc_html_e( 'Threat intelligence & software inventory', 'integrity-sentinel' ); ?></h2>
+		<p>
+			<?php esc_html_e( 'Configure API keys here, then look up an IP\'s reputation from the Audit Log page or a finding\'s file hash from the Findings page — lookups are on-demand, not automatic, to keep this predictable and within free-tier quotas.', 'integrity-sentinel' ); ?>
+		</p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_threat_intel_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_threat_intel_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Allow on-demand reputation lookups.', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="is_ti_abuseipdb_key"><?php esc_html_e( 'AbuseIPDB API key', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<input type="text" id="is_ti_abuseipdb_key" name="is_threat_intel_settings[abuseipdb_key]" value="<?php echo esc_attr( $settings['abuseipdb_key'] ); ?>" class="regular-text" autocomplete="off">
+						<p class="description">
+							<?php
+							printf(
+								/* translators: %s: link to abuseipdb.com/register */
+								wp_kses(
+									__( 'Free tier available — <a href="%s" target="_blank" rel="noopener noreferrer">register at abuseipdb.com</a>.', 'integrity-sentinel' ),
+									array(
+										'a' => array(
+											'href'   => array(),
+											'target' => array(),
+											'rel'    => array(),
+										),
+									)
+								),
+								'https://www.abuseipdb.com/register'
+							);
+							?>
+						</p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="is_ti_virustotal_key"><?php esc_html_e( 'VirusTotal API key', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<input type="text" id="is_ti_virustotal_key" name="is_threat_intel_settings[virustotal_key]" value="<?php echo esc_attr( $settings['virustotal_key'] ); ?>" class="regular-text" autocomplete="off">
+						<p class="description">
+							<?php
+							printf(
+								/* translators: %s: link to virustotal.com/gui/join-us */
+								wp_kses(
+									__( 'Free tier available — <a href="%s" target="_blank" rel="noopener noreferrer">register at virustotal.com</a>.', 'integrity-sentinel' ),
+									array(
+										'a' => array(
+											'href'   => array(),
+											'target' => array(),
+											'rel'    => array(),
+										),
+									)
+								),
+								'https://www.virustotal.com/gui/join-us'
+							);
+							?>
+						</p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save threat intelligence settings', 'integrity-sentinel' ) ); ?>
+		</form>
+
+		<h3><?php esc_html_e( 'Software inventory (SBOM)', 'integrity-sentinel' ); ?></h3>
+		<p class="description"><?php esc_html_e( 'A CycloneDX-style export of every installed component (core, plugins, active theme) with its current version — regenerated and diffed automatically on every scan; an unexpected change shows up in the Audit Log as "Software inventory changed".', 'integrity-sentinel' ); ?></p>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<?php wp_nonce_field( 'is_threat_intel_action' ); ?>
+			<input type="hidden" name="action" value="is_download_sbom">
+			<?php submit_button( __( 'Download SBOM (JSON)', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
 		</form>
 		<?php
 	}
@@ -2620,15 +2906,25 @@ class IS_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$per_page = 50;
-		$paged    = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only pagination
-		$entries  = IS_Audit_Log::entries( $per_page, ( $paged - 1 ) * $per_page );
-		$total    = IS_Audit_Log::count();
-		$pages    = max( 1, (int) ceil( $total / $per_page ) );
+		$per_page    = 50;
+		$paged       = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only pagination
+		$entries     = IS_Audit_Log::entries( $per_page, ( $paged - 1 ) * $per_page );
+		$total       = IS_Audit_Log::count();
+		$pages       = max( 1, (int) ceil( $total / $per_page ) );
+		$error       = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$ti_result   = isset( $_GET['is_ti_result'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_ti_result'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$ti_settings = IS_Threat_Intel::settings();
+		$ti_ready    = ! empty( $ti_settings['enabled'] ) && '' !== trim( (string) $ti_settings['abuseipdb_key'] );
 		$this->render_shell_open( 'audit' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Audit Log', 'integrity-sentinel' ); ?></h1>
+			<?php if ( $error ) : ?>
+				<div class="notice notice-error"><p><?php echo esc_html( $error ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( $ti_result ) : ?>
+				<div class="notice notice-info"><p><?php echo esc_html( $ti_result ); ?></p></div>
+			<?php endif; ?>
 			<p class="description">
 				<?php esc_html_e( 'Append-only record of every security-relevant action: scans, finding status changes, settings changes, hardening actions, deactivations. Nothing done through WordPress can act on this plugin without leaving a row here.', 'integrity-sentinel' ); ?>
 			</p>
@@ -2651,7 +2947,17 @@ class IS_Admin {
 						<tr>
 							<td><?php echo esc_html( $entry['created_at'] ); ?></td>
 							<td><?php echo esc_html( $entry['user_login'] ); ?></td>
-							<td><?php echo esc_html( $entry['ip'] ); ?></td>
+							<td>
+								<?php echo esc_html( $entry['ip'] ); ?>
+								<?php if ( $ti_ready && $entry['ip'] ) : ?>
+									<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+										<?php wp_nonce_field( 'is_threat_intel_action' ); ?>
+										<input type="hidden" name="action" value="is_check_ip_reputation">
+										<input type="hidden" name="ip" value="<?php echo esc_attr( $entry['ip'] ); ?>">
+										<button type="submit" class="button-link"><?php esc_html_e( 'Check reputation', 'integrity-sentinel' ); ?></button>
+									</form>
+								<?php endif; ?>
+							</td>
 							<td><code><?php echo esc_html( $entry['action'] ); ?></code></td>
 							<td><code><?php echo esc_html( (string) $entry['detail'] ); ?></code></td>
 						</tr>

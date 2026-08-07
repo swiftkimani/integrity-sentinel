@@ -370,6 +370,14 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_deception_settings' ),
 			)
 		);
+		register_setting(
+			'is_api_key_hygiene_settings_group',
+			'is_api_key_hygiene_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_api_key_hygiene_settings' ),
+			)
+		);
 	}
 
 	public function sanitize_vulnerability_scanner_settings( $input ) {
@@ -475,10 +483,31 @@ class IS_Admin {
 
 	public function sanitize_session_settings( $input ) {
 		$old = IS_Sessions::settings();
-		$out = array( 'alert_on_new_ip' => empty( $input['alert_on_new_ip'] ) ? 0 : 1 );
+		$out = array(
+			'alert_on_new_ip'                  => empty( $input['alert_on_new_ip'] ) ? 0 : 1,
+			'impossible_travel_detection'      => empty( $input['impossible_travel_detection'] ) ? 0 : 1,
+			'impossible_travel_window_minutes' => max( 5, min( 1440, (int) ( $input['impossible_travel_window_minutes'] ?? 60 ) ) ),
+		);
 
-		if ( $out['alert_on_new_ip'] !== $old['alert_on_new_ip'] ) {
-			IS_Audit_Log::record( 'session_settings_changed', array( 'alert_on_new_ip' => $out['alert_on_new_ip'] ) );
+		$changed = array();
+		foreach ( $out as $key => $value ) {
+			if ( (string) ( $old[ $key ] ?? '' ) !== (string) $value ) {
+				$changed[] = $key;
+			}
+		}
+		if ( $changed ) {
+			IS_Audit_Log::record( 'session_settings_changed', array( 'keys' => $changed ) );
+		}
+
+		return $out;
+	}
+
+	public function sanitize_api_key_hygiene_settings( $input ) {
+		$old = IS_Api_Key_Hygiene::settings();
+		$out = array( 'stale_after_days' => max( 1, min( 3650, (int) ( $input['stale_after_days'] ?? 90 ) ) ) );
+
+		if ( $out['stale_after_days'] !== $old['stale_after_days'] ) {
+			IS_Audit_Log::record( 'api_key_hygiene_settings_changed', array( 'stale_after_days' => $out['stale_after_days'] ) );
 		}
 
 		return $out;
@@ -2658,6 +2687,7 @@ class IS_Admin {
 				</form>
 			<?php endif; ?>
 
+			<?php $session_settings = IS_Sessions::settings(); ?>
 			<form method="post" action="options.php" style="margin-top:20px;">
 				<?php settings_fields( 'is_session_settings_group' ); ?>
 				<table class="form-table" role="presentation">
@@ -2665,18 +2695,88 @@ class IS_Admin {
 						<th scope="row"><?php esc_html_e( 'New-IP alerts', 'integrity-sentinel' ); ?></th>
 						<td>
 							<label>
-								<input type="checkbox" name="is_session_settings[alert_on_new_ip]" value="1" <?php checked( IS_Sessions::settings()['alert_on_new_ip'], 1 ); ?>>
+								<input type="checkbox" name="is_session_settings[alert_on_new_ip]" value="1" <?php checked( $session_settings['alert_on_new_ip'], 1 ); ?>>
 								<?php esc_html_e( 'Email/webhook alert the first time an account logs in from an IP it hasn\'t used before.', 'integrity-sentinel' ); ?>
 							</label>
 							<p class="description"><?php esc_html_e( 'A signal, not a block — travel and new devices are normal and still get in; you just get notified.', 'integrity-sentinel' ); ?></p>
 						</td>
 					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Impossible-travel detection', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_session_settings[impossible_travel_detection]" value="1" <?php checked( $session_settings['impossible_travel_detection'], 1 ); ?>>
+								<?php esc_html_e( 'Raise a higher-severity alert when an account logs in from a very different network shortly after its previous login.', 'integrity-sentinel' ); ?>
+							</label>
+							<p class="description"><?php esc_html_e( 'A lightweight heuristic (network distance, not true geolocation) — no bundled GeoIP database, no external lookups. IPv4 logins only.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_impossible_travel_window"><?php esc_html_e( 'Impossible-travel window (minutes)', 'integrity-sentinel' ); ?></label></th>
+						<td><input type="number" min="5" max="1440" id="is_impossible_travel_window" name="is_session_settings[impossible_travel_window_minutes]" value="<?php echo esc_attr( $session_settings['impossible_travel_window_minutes'] ); ?>" class="small-text"></td>
+					</tr>
 				</table>
 				<?php submit_button( __( 'Save session settings', 'integrity-sentinel' ) ); ?>
 			</form>
+
+			<?php $this->render_api_key_hygiene_section(); ?>
 		</div>
 		<?php
 		$this->render_shell_close();
+	}
+
+	/** Read-only overview of every account's Application Passwords (WordPress core's own credential type) with a staleness flag -- no new credential storage here, just visibility into what core already tracks. */
+	private function render_api_key_hygiene_section() {
+		$settings = IS_Api_Key_Hygiene::settings();
+		$keys     = IS_Api_Key_Hygiene::list_all();
+		?>
+		<h2><?php esc_html_e( 'API key hygiene (Application Passwords)', 'integrity-sentinel' ); ?></h2>
+		<p class="description"><?php esc_html_e( 'Every Application Password across every account, with when it was created, last used, and from where. A credential nobody has used in a while is worth revoking under Users → Profile.', 'integrity-sentinel' ); ?></p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_api_key_hygiene_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="is_stale_after_days"><?php esc_html_e( 'Flag as stale after (days unused)', 'integrity-sentinel' ); ?></label></th>
+					<td><input type="number" min="1" max="3650" id="is_stale_after_days" name="is_api_key_hygiene_settings[stale_after_days]" value="<?php echo esc_attr( $settings['stale_after_days'] ); ?>" class="small-text"></td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save API key hygiene settings', 'integrity-sentinel' ) ); ?>
+		</form>
+		<?php if ( empty( $keys ) ) : ?>
+			<p class="description"><?php esc_html_e( 'No Application Passwords exist yet.', 'integrity-sentinel' ); ?></p>
+		<?php else : ?>
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'User', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Name', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Created', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Last used', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Last IP', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Status', 'integrity-sentinel' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( $keys as $key ) : ?>
+						<tr>
+							<td><?php echo esc_html( $key['user_login'] ); ?></td>
+							<td><?php echo esc_html( $key['name'] ); ?></td>
+							<td><?php echo $key['created'] ? esc_html( human_time_diff( $key['created'] ) . ' ' . __( 'ago', 'integrity-sentinel' ) ) : esc_html__( 'Unknown', 'integrity-sentinel' ); ?></td>
+							<td><?php echo $key['last_used'] ? esc_html( human_time_diff( $key['last_used'] ) . ' ' . __( 'ago', 'integrity-sentinel' ) ) : esc_html__( 'Never', 'integrity-sentinel' ); ?></td>
+							<td><?php echo esc_html( $key['last_ip'] ? $key['last_ip'] : '—' ); ?></td>
+							<td>
+								<?php if ( $key['is_stale'] ) : ?>
+									<span class="is-badge is-badge-medium"><?php esc_html_e( 'Stale', 'integrity-sentinel' ); ?></span>
+								<?php else : ?>
+									<span class="is-badge is-badge-low"><?php esc_html_e( 'Active', 'integrity-sentinel' ); ?></span>
+								<?php endif; ?>
+							</td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+		<?php endif; ?>
+		<?php
 	}
 
 	/** Renders the active-sessions table for one user (used on the Login Security page for the current admin). */

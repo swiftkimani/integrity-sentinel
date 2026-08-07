@@ -29,8 +29,9 @@ class IS_Sessions {
 
 	private static $instance = null;
 
-	const KNOWN_IPS_META_KEY = '_is_known_login_ips';
-	const MAX_KNOWN_IPS      = 20;
+	const KNOWN_IPS_META_KEY  = '_is_known_login_ips';
+	const LAST_LOGIN_META_KEY = '_is_last_login';
+	const MAX_KNOWN_IPS       = 20;
 
 	public static function instance() {
 		if ( null === self::$instance ) {
@@ -41,7 +42,11 @@ class IS_Sessions {
 	}
 
 	public static function default_settings() {
-		return array( 'alert_on_new_ip' => 1 );
+		return array(
+			'alert_on_new_ip'                  => 1,
+			'impossible_travel_detection'      => 1,
+			'impossible_travel_window_minutes' => 60,
+		);
 	}
 
 	public static function settings() {
@@ -84,6 +89,48 @@ class IS_Sessions {
 			$known_ips = array_slice( $known_ips, -1 * $max );
 		}
 		return $known_ips;
+	}
+
+	/**
+	 * Pure: the /16 subnet (first two IPv4 octets) of an address, or
+	 * null for anything that isn't a plain IPv4 address -- this
+	 * heuristic deliberately doesn't attempt an IPv6 equivalent (prefix
+	 * boundaries there don't map cleanly to "roughly the same network"
+	 * the way a /16 does for IPv4).
+	 */
+	public static function ipv4_slash16( $ip ) {
+		if ( ! preg_match( '/^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/', (string) $ip, $m ) ) {
+			return null;
+		}
+		return $m[1] . '.' . $m[2];
+	}
+
+	/**
+	 * Pure: does this login look like impossible travel -- a different
+	 * /16 subnet than the account's immediately preceding login, within
+	 * an implausibly short time of it? A geo-IP database would give a
+	 * true distance/speed calculation; this trades that precision for
+	 * zero bundled data and no external lookups, on the theory that
+	 * "same account, wildly different network, within the hour" is
+	 * already a strong enough signal on its own. Never fires without a
+	 * genuine previous login on record, or across two logins outside the
+	 * window, or when either address isn't plain IPv4.
+	 *
+	 * @param array{ip?:string,time?:int} $previous
+	 */
+	public static function is_impossible_travel( array $previous, $ip, $now, $window_seconds ) {
+		if ( empty( $previous['ip'] ) || empty( $previous['time'] ) ) {
+			return false;
+		}
+		if ( ( $now - (int) $previous['time'] ) > max( 1, (int) $window_seconds ) ) {
+			return false;
+		}
+		$prev_subnet = self::ipv4_slash16( $previous['ip'] );
+		$new_subnet  = self::ipv4_slash16( $ip );
+		if ( null === $prev_subnet || null === $new_subnet ) {
+			return false;
+		}
+		return $prev_subnet !== $new_subnet;
 	}
 
 	/**
@@ -134,17 +181,15 @@ class IS_Sessions {
 		IS_Guard::run(
 			'session_security',
 			function () use ( $user ) {
-				if ( empty( self::settings()['alert_on_new_ip'] ) ) {
-					return;
-				}
-				$ip = IS_IP_List::client_ip();
+				$settings = self::settings();
+				$ip       = IS_IP_List::client_ip();
 				if ( '' === $ip ) {
 					return;
 				}
 
 				$known = (array) get_user_meta( $user->ID, self::KNOWN_IPS_META_KEY, true );
 
-				if ( self::is_new_ip( $ip, $known ) ) {
+				if ( ! empty( $settings['alert_on_new_ip'] ) && self::is_new_ip( $ip, $known ) ) {
 					IS_Audit_Log::record(
 						'login_from_new_ip',
 						array(
@@ -168,6 +213,32 @@ class IS_Sessions {
 					);
 				}
 
+				$now      = time();
+				$previous = (array) get_user_meta( $user->ID, self::LAST_LOGIN_META_KEY, true );
+				if ( ! empty( $settings['impossible_travel_detection'] ) ) {
+					$window_seconds = (int) $settings['impossible_travel_window_minutes'] * MINUTE_IN_SECONDS;
+					if ( self::is_impossible_travel( $previous, $ip, $now, $window_seconds ) ) {
+						IS_Detections::fire(
+							'impossible_travel_suspected',
+							array(
+								'user_id'     => $user->ID,
+								'user_login'  => $user->user_login,
+								'previous_ip' => $previous['ip'],
+								'new_ip'      => $ip,
+								'seconds'     => $now - (int) $previous['time'],
+							)
+						);
+					}
+				}
+
+				update_user_meta(
+					$user->ID,
+					self::LAST_LOGIN_META_KEY,
+					array(
+						'ip'   => $ip,
+						'time' => $now,
+					)
+				);
 				update_user_meta( $user->ID, self::KNOWN_IPS_META_KEY, self::record_known_ip( $known, $ip ) );
 			}
 		);

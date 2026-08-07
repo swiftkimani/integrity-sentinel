@@ -64,6 +64,11 @@ class IS_Detections {
 				'severity' => 'critical',
 				'category' => 'deception',
 			),
+			'impossible_travel_suspected'  => array(
+				'label'    => __( 'Impossible travel: rapid login from a very different network', 'integrity-sentinel' ),
+				'severity' => 'high',
+				'category' => 'anomalous-access',
+			),
 		);
 	}
 

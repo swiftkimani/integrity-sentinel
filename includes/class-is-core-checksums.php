@@ -45,11 +45,14 @@ class IS_Core_Checksums {
 			return $response;
 		}
 		if ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
-			return new WP_Error( 'is_core_checksums_http', sprintf(
+			return new WP_Error(
+				'is_core_checksums_http',
+				sprintf(
 				/* translators: %d: HTTP status code */
-				__( 'WordPress.org checksum API returned HTTP %d.', 'integrity-sentinel' ),
-				wp_remote_retrieve_response_code( $response )
-			) );
+					__( 'WordPress.org checksum API returned HTTP %d.', 'integrity-sentinel' ),
+					wp_remote_retrieve_response_code( $response )
+				)
+			);
 		}
 
 		$body = json_decode( wp_remote_retrieve_body( $response ), true );

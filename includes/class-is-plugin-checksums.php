@@ -71,15 +71,18 @@ class IS_Plugin_Checksums {
 			return $this->not_found_error( $slug, $version );
 		}
 		if ( 200 !== $code ) {
-			return new WP_Error( 'is_plugin_checksums_http', sprintf(
+			return new WP_Error(
+				'is_plugin_checksums_http',
+				sprintf(
 				/* translators: 1: plugin slug, 2: HTTP status code */
-				__( 'Checksum lookup for %1$s returned HTTP %2$d.', 'integrity-sentinel' ),
-				$slug,
-				$code
-			) );
+					__( 'Checksum lookup for %1$s returned HTTP %2$d.', 'integrity-sentinel' ),
+					$slug,
+					$code
+				)
+			);
 		}
 
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
+		$body   = json_decode( wp_remote_retrieve_body( $response ), true );
 		$parsed = $this->normalize_response( $body );
 
 		if ( is_wp_error( $parsed ) ) {
@@ -155,7 +158,7 @@ class IS_Plugin_Checksums {
 		if ( ! function_exists( 'get_plugins' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/plugin.php';
 		}
-		$all  = get_plugins();
+		$all    = get_plugins();
 		$wp_org = array();
 		$other  = array();
 

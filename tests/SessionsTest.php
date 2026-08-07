@@ -71,4 +71,46 @@ class SessionsTest extends TestCase {
 	public function test_handles_an_empty_user_agent() {
 		$this->assertSame( 'Unknown device', IS_Sessions::describe_user_agent( '' ) );
 	}
+
+	// ---- ipv4_slash16 ----------------------------------------------------
+
+	public function test_extracts_the_slash16_of_an_ipv4_address() {
+		$this->assertSame( '203.0', IS_Sessions::ipv4_slash16( '203.0.113.9' ) );
+	}
+
+	public function test_returns_null_for_an_ipv6_address() {
+		$this->assertNull( IS_Sessions::ipv4_slash16( '2001:db8::1' ) );
+	}
+
+	public function test_returns_null_for_garbage() {
+		$this->assertNull( IS_Sessions::ipv4_slash16( 'not-an-ip' ) );
+	}
+
+	// ---- is_impossible_travel ---------------------------------------------
+
+	const TRAVEL_WINDOW = 3600;
+
+	public function test_flags_a_different_subnet_within_the_window() {
+		$previous = array( 'ip' => '203.0.113.9', 'time' => 1000 );
+		$this->assertTrue( IS_Sessions::is_impossible_travel( $previous, '198.51.100.1', 1500, self::TRAVEL_WINDOW ) );
+	}
+
+	public function test_does_not_flag_the_same_subnet() {
+		$previous = array( 'ip' => '203.0.113.9', 'time' => 1000 );
+		$this->assertFalse( IS_Sessions::is_impossible_travel( $previous, '203.0.113.42', 1500, self::TRAVEL_WINDOW ) );
+	}
+
+	public function test_does_not_flag_outside_the_window() {
+		$previous = array( 'ip' => '203.0.113.9', 'time' => 1000 );
+		$this->assertFalse( IS_Sessions::is_impossible_travel( $previous, '198.51.100.1', 1000 + self::TRAVEL_WINDOW + 1, self::TRAVEL_WINDOW ) );
+	}
+
+	public function test_does_not_flag_without_a_previous_login() {
+		$this->assertFalse( IS_Sessions::is_impossible_travel( array(), '198.51.100.1', 1500, self::TRAVEL_WINDOW ) );
+	}
+
+	public function test_does_not_flag_when_either_address_is_not_ipv4() {
+		$previous = array( 'ip' => '2001:db8::1', 'time' => 1000 );
+		$this->assertFalse( IS_Sessions::is_impossible_travel( $previous, '198.51.100.1', 1500, self::TRAVEL_WINDOW ) );
+	}
 }

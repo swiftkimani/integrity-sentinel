@@ -238,7 +238,10 @@ class IS_Hardening {
 			$this->check_core_update(),
 			$this->check_dangerous_functions(),
 			$this->check_salt_uniqueness(),
-			$this->check_plaintext_secrets()
+			$this->check_plaintext_secrets(),
+			$this->check_dormant_admins(),
+			$this->check_admin_email_domain(),
+			$this->check_tls_certificate()
 		);
 	}
 
@@ -494,6 +497,152 @@ class IS_Hardening {
 					implode( ', ', $flagged )
 				)
 			),
+		);
+	}
+
+	/** Administrator accounts idle longer than this are flagged as dormant. */
+	const DORMANT_ADMIN_DAYS = 180;
+
+	/**
+	 * Pure: has this account's last recorded login gone stale? A missing
+	 * timestamp (never tracked -- e.g. the account predates IS_Sessions,
+	 * or has never logged in since) is deliberately treated as "no data"
+	 * rather than "dormant", to avoid false-flagging every admin account
+	 * that existed before this plugin started tracking logins.
+	 *
+	 * @param array{time?:int} $last_login         IS_Sessions::LAST_LOGIN_META_KEY shape.
+	 * @param int              $now                Current unix timestamp.
+	 * @param int              $dormant_after_days Number of idle days after which an account is considered dormant.
+	 */
+	public static function is_dormant( array $last_login, $now, $dormant_after_days ) {
+		if ( empty( $last_login['time'] ) ) {
+			return false;
+		}
+		return ( (int) $now - (int) $last_login['time'] ) > ( max( 1, (int) $dormant_after_days ) * DAY_IN_SECONDS );
+	}
+
+	/**
+	 * Flags administrator accounts whose last tracked login is older than DORMANT_ADMIN_DAYS.
+	 */
+	private function check_dormant_admins() {
+		$out    = array();
+		$admins = get_users(
+			array(
+				'role'   => 'administrator',
+				'fields' => array( 'ID', 'user_login' ),
+			)
+		);
+		$now    = time();
+
+		foreach ( $admins as $admin ) {
+			$last_login = (array) get_user_meta( $admin->ID, IS_Sessions::LAST_LOGIN_META_KEY, true );
+			if ( ! self::is_dormant( $last_login, $now, self::DORMANT_ADMIN_DAYS ) ) {
+				continue;
+			}
+			$days_idle = (int) floor( ( $now - (int) $last_login['time'] ) / DAY_IN_SECONDS );
+			$out[]     = $this->finding(
+				'dormant_administrator',
+				'medium',
+				'user:' . $admin->user_login,
+				sprintf(
+					/* translators: 1: user login, 2: number of days since last login */
+					__( 'Administrator account "%1$s" has not logged in for %2$d days. A dormant admin account is a standing target — consider removing it or downgrading its role if it\'s no longer needed.', 'integrity-sentinel' ),
+					$admin->user_login,
+					$days_idle
+				)
+			);
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Pure: does the admin_email's domain differ from the site's own
+	 * domain? A common indicator of a hijacked/misconfigured account-
+	 * recovery path -- password-reset and security-alert emails for this
+	 * site go to an address on an entirely different domain.
+	 *
+	 * @param string $admin_email The site's configured admin_email option.
+	 * @param string $site_host   The site's own host, e.g. wp_parse_url( home_url(), PHP_URL_HOST ).
+	 */
+	public static function admin_email_domain_mismatched( $admin_email, $site_host ) {
+		$at = strrpos( (string) $admin_email, '@' );
+		if ( false === $at ) {
+			return false;
+		}
+		$email_domain = strtolower( substr( $admin_email, $at + 1 ) );
+		$site_host    = strtolower( trim( (string) $site_host ) );
+		if ( '' === $email_domain || '' === $site_host ) {
+			return false;
+		}
+		// A subdomain of the site's own domain (e.g. mail.example.com for
+		// example.com) is a normal, common setup -- only flag a genuinely
+		// unrelated domain. substr_compare(), not str_ends_with() (PHP 8+
+		// only) -- this plugin's floor is PHP 7.4.
+		$suffix       = '.' . $site_host;
+		$is_subdomain = strlen( $email_domain ) > strlen( $suffix )
+			&& 0 === substr_compare( $email_domain, $suffix, -strlen( $suffix ) );
+		return $email_domain !== $site_host && ! $is_subdomain;
+	}
+
+	/**
+	 * Flags an admin_email whose domain doesn't match the site's own domain.
+	 */
+	private function check_admin_email_domain() {
+		$admin_email = get_option( 'admin_email' );
+		$site_host   = wp_parse_url( home_url(), PHP_URL_HOST );
+
+		if ( ! self::admin_email_domain_mismatched( $admin_email, $site_host ) ) {
+			return array();
+		}
+
+		return array(
+			$this->finding(
+				'admin_email_domain_mismatch',
+				'low',
+				'wp_options:admin_email',
+				sprintf(
+					/* translators: 1: admin email address, 2: site domain */
+					__( 'The site\'s alert email address (%1$s) is on a different domain than the site itself (%2$s). Worth double-checking this is intentional — security alerts and password resets for this site go to that address.', 'integrity-sentinel' ),
+					$admin_email,
+					$site_host
+				)
+			),
+		);
+	}
+
+	/**
+	 * Flags the site's own TLS certificate if it's expiring soon or already expired.
+	 */
+	private function check_tls_certificate() {
+		$host = wp_parse_url( home_url(), PHP_URL_HOST );
+		if ( ! $host || 'https' !== wp_parse_url( home_url(), PHP_URL_SCHEME ) ) {
+			return array(); // Nothing to check on a plain-HTTP site.
+		}
+
+		$result = IS_TLS_Check::check_certificate( $host );
+		if ( ! $result['ok'] ) {
+			return array(); // A transient/network hiccup shouldn't manufacture a false finding -- retried next scan.
+		}
+		if ( 'low' === $result['severity'] ) {
+			return array();
+		}
+
+		$detail = $result['days_remaining'] < 0
+			? sprintf(
+				/* translators: %s: certificate issuer common name */
+				__( 'The TLS certificate for this site has already EXPIRED (issued by %s). HTTPS visitors will see a browser security warning.', 'integrity-sentinel' ),
+				$result['issuer']
+			)
+			: sprintf(
+				/* translators: 1: days remaining, 2: certificate issuer common name */
+				__( 'The TLS certificate for this site expires in %1$d day(s) (issued by %2$s). Renew it before it lapses.', 'integrity-sentinel' ),
+				$result['days_remaining'],
+				$result['issuer']
+			);
+
+		return array(
+			$this->finding( 'tls_certificate_expiring', $result['severity'], 'https:' . $host, $detail ),
 		);
 	}
 

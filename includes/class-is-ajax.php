@@ -48,6 +48,7 @@ class IS_Ajax {
 		add_action( 'wp_ajax_is_set_finding_status', array( $this, 'set_finding_status' ) );
 		add_action( 'wp_ajax_is_view_finding', array( $this, 'view_finding' ) );
 		add_action( 'wp_ajax_is_preview_login_design', array( $this, 'preview_login_design' ) );
+		add_action( 'wp_ajax_is_run_bas_self_test', array( $this, 'run_bas_self_test' ) );
 	}
 
 	/**
@@ -194,5 +195,23 @@ class IS_Ajax {
 		$draft = IS_Admin::instance()->sanitize_login_design_input( $raw, IS_Login_Design::settings() );
 		IS_Login_Design::store_preview( $draft );
 		wp_send_json_success( array( 'preview_url' => add_query_arg( 'is_preview', '1', wp_login_url() ) ) );
+	}
+
+	/**
+	 * Runs the Breach & Attack Simulation self-test and returns its
+	 * pass/fail results. See IS_BAS's class doc: synthetic/logic-level
+	 * verification only -- no live traffic, no real data touched.
+	 */
+	public function run_bas_self_test() {
+		$this->guard();
+		$results = IS_BAS::run_checks();
+		IS_Audit_Log::record(
+			'bas_self_test_run',
+			array(
+				'passed' => count( array_filter( $results, fn( $r ) => $r['passed'] ) ),
+				'total'  => count( $results ),
+			)
+		);
+		wp_send_json_success( array( 'results' => $results ) );
 	}
 }

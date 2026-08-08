@@ -76,6 +76,7 @@ function is_init() {
 	IS_Asset_Cloak::instance();
 	IS_Password_Policy::instance();
 	IS_Deception::instance();
+	IS_Custom_Detections::instance();
 
 	if ( is_admin() ) {
 		IS_Admin::instance();

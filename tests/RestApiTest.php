@@ -147,6 +147,18 @@ class RestApiTest extends TestCase {
 		$this->assertSame( array(), IS_Rest_API::classify_routes( $routes ) );
 	}
 
+	public function test_classify_routes_excludes_core_batch_endpoint() {
+		// Confirmed via live testing: WordPress core's own /batch/v1 has
+		// no top-level permission_callback by design -- it re-checks each
+		// sub-request against its own target route's real check.
+		$routes = array(
+			'/batch/v1' => array(
+				array( 'methods' => array( 'POST' => true ), 'permission_callback' => '__return_true' ),
+			),
+		);
+		$this->assertSame( array(), IS_Rest_API::classify_routes( $routes ) );
+	}
+
 	// ---- route_excluded_from_audit -----------------------------------------
 
 	public function test_route_excluded_when_prefix_matches() {

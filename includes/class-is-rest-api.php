@@ -63,6 +63,19 @@ class IS_Rest_API {
 	const WRITE_METHODS = array( 'POST', 'PUT', 'PATCH', 'DELETE' );
 
 	/**
+	 * WordPress-core route prefixes that are intentionally unprotected at
+	 * the top level by design, confirmed by live-testing this audit
+	 * against a real WordPress install: core's own REST batch endpoint
+	 * (batch/v1) has no permission_callback of its own because it
+	 * re-checks each individual sub-request against ITS OWN target
+	 * route's real permission_callback internally -- a missing top-level
+	 * check here is not a vulnerability, and flagging it would put a
+	 * false "unprotected write" finding on every vanilla WordPress
+	 * install.
+	 */
+	const CORE_SAFE_UNPROTECTED_PREFIXES = array( 'batch/v1' );
+
+	/**
 	 * Default settings for this module.
 	 *
 	 * @return array
@@ -252,6 +265,9 @@ class IS_Rest_API {
 		$out = array();
 		foreach ( $routes as $route => $handlers ) {
 			if ( ! is_array( $handlers ) ) {
+				continue;
+			}
+			if ( self::route_excluded_from_audit( $route, self::CORE_SAFE_UNPROTECTED_PREFIXES ) ) {
 				continue;
 			}
 			foreach ( $handlers as $handler ) {

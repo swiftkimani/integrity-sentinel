@@ -33,7 +33,7 @@
     "includes/class-is-quarantine.php": "ca06693c499dacf968aa3aa3437d4c47c4c61916ea625bfcdb4f758f87646302",
     "includes/class-is-ransomware-canary.php": "1152d0f229457fdc9c6e64d41c89124d7762be299e25ba7cf776acf2c2e0e561",
     "includes/class-is-rate-limiter.php": "d0194fa606bb9f1c67f170a44995ee92df9179072aa7a64218681cb299740000",
-    "includes/class-is-rest-api.php": "194ee3c6dd328d09d9ca01fac9a7179d96cbc5b9f1bb410ad609798bf3380f8f",
+    "includes/class-is-rest-api.php": "8ceb633cf0fc6801dc9ce5ae51de25ceaf4fd78069577229cb8c1d5425072c35",
     "includes/class-is-rest-posts.php": "d7c37f46170cd35a5f65fc43cc0c66f263dadb7116d29e1f1ce8228acb1c5fdb",
     "includes/class-is-sbom.php": "f34fa5cc0abe7730c8e0193124d155b0df1d1ceb1be950db5a7c29e687375584",
     "includes/class-is-scanner.php": "4ef48acc49d40b11199101eec98791b95daafcc1e50965129eee50c08b89ede7",
@@ -46,6 +46,6 @@
     "includes/class-is-update-monitor.php": "0f2e9090ac412d825ec47d6c19e85a128d0305c7e48cf63a3e021cec484093dc",
     "includes/class-is-upload-guard.php": "d539ef4bb4c95946cf3ab0438cc2be7a984fbcfd5beb53b131dd4edb90b73add",
     "includes/class-is-vulnerability-scanner.php": "2c848d39ddc50b076351e0513958105ee4f29838ee45f53d182988860f1590ae",
-    "integrity-sentinel.php": "95eb9758ba75d137dd7d10f382d7dd66d8ee701a84fc4b7d59b6d15cefd83d52",
+    "integrity-sentinel.php": "2ce2c250461d92ea7588b86af8fc018b46d777edf2ab59a8fd3e813ecd2053c9",
     "uninstall.php": "1f47d97f9f5451dcaf60262b979e1ed94699a8186725eb3ad74006f8f101e9eb"
 }

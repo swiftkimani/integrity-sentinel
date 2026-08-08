@@ -137,10 +137,17 @@ class IS_WebAuthn {
 	private function user_handle( $user_id ) {
 		$stored = get_user_meta( $user_id, '_is_webauthn_user_handle', true );
 		if ( is_string( $stored ) && '' !== $stored ) {
-			return $stored;
+			return base64_decode( $stored ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decoding our own stored value, not user input; see the encode side below for why this is base64 at all
 		}
 		$handle = random_bytes( 32 );
-		update_user_meta( $user_id, '_is_webauthn_user_handle', $handle );
+		// Stored base64-encoded, not raw: random_bytes() can contain NUL
+		// bytes and other invalid-UTF8 sequences that aren't safe to
+		// round-trip through update_user_meta()/wpdb's TEXT column
+		// unmangled -- this bit us during live testing (CheckUserHandle
+		// failed with "Invalid user handle" because the stored raw bytes
+		// didn't match what was embedded in the credential at
+		// registration time).
+		update_user_meta( $user_id, '_is_webauthn_user_handle', base64_encode( $handle ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- encoding for safe storage, not obfuscation
 		return $handle;
 	}
 
@@ -292,7 +299,7 @@ class IS_WebAuthn {
 		$existing    = array_map(
 			function ( $entry ) {
 				$record = $entry['record'];
-				return new \Webauthn\PublicKeyCredentialDescriptor( 'public-key', base64_decode( $record['publicKeyCredentialId'] ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decoding our own previously base64-encoded credential ID (the library's own storage encoding), not user input
+				return new \Webauthn\PublicKeyCredentialDescriptor( 'public-key', \ParagonIE\ConstantTime\Base64UrlSafe::decode( $record['publicKeyCredentialId'] ) ); // Base64UrlSafe, matching CredentialRecordDenormalizer's own encodeUnpadded() -- NOT standard base64, which silently corrupts on any '-'/'_' character.
 			},
 			self::credentials( $user_id )
 		);
@@ -423,7 +430,7 @@ class IS_WebAuthn {
 		$allow   = array_map(
 			function ( $entry ) {
 				$record = $entry['record'];
-				return new \Webauthn\PublicKeyCredentialDescriptor( 'public-key', base64_decode( $record['publicKeyCredentialId'] ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decoding our own previously base64-encoded credential ID (the library's own storage encoding), not user input
+				return new \Webauthn\PublicKeyCredentialDescriptor( 'public-key', \ParagonIE\ConstantTime\Base64UrlSafe::decode( $record['publicKeyCredentialId'] ) ); // Base64UrlSafe, matching CredentialRecordDenormalizer's own encodeUnpadded() -- NOT standard base64, which silently corrupts on any '-'/'_' character.
 			},
 			self::credentials( $user_id )
 		);
@@ -478,7 +485,7 @@ class IS_WebAuthn {
 			$entries        = self::credentials( $user_id );
 			$matched_record = null;
 			foreach ( $entries as $entry ) {
-				if ( hash_equals( (string) $entry['record']['publicKeyCredentialId'], (string) base64_encode( $raw_id ) ) ) { // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- comparing against our own stored base64 credential ID, not user input directly
+				if ( hash_equals( (string) $entry['record']['publicKeyCredentialId'], \ParagonIE\ConstantTime\Base64UrlSafe::encodeUnpadded( $raw_id ) ) ) { // Base64UrlSafe, matching CredentialRecordDenormalizer's own encodeUnpadded() -- NOT standard base64.
 					$matched_record = $entry['record'];
 					break;
 				}

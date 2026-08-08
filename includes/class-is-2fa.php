@@ -159,6 +159,22 @@ class IS_2FA {
 	}
 
 	/**
+	 * Whether the user has ANY second factor set up -- TOTP, or (when
+	 * available) WebAuthn credentials. Used everywhere "does this user
+	 * already have 2FA" matters (login interception, enforcement
+	 * nudging), so a WebAuthn-only user is treated exactly the same as
+	 * a TOTP-only user rather than being silently unprotected.
+	 *
+	 * @param int $user_id User ID.
+	 */
+	public static function any_method_enabled( $user_id ) {
+		if ( self::is_enabled( $user_id ) ) {
+			return true;
+		}
+		return class_exists( 'IS_WebAuthn' ) && IS_WebAuthn::is_available() && IS_WebAuthn::has_credentials( $user_id );
+	}
+
+	/**
 	 * The user's stored TOTP secret, or an empty string if none is set.
 	 *
 	 * @param int $user_id User ID.
@@ -421,7 +437,7 @@ class IS_2FA {
 				}
 
 				$user = wp_get_current_user();
-				if ( ! $user || ! $user->ID || self::is_enabled( $user->ID ) ) {
+				if ( ! $user || ! $user->ID || self::any_method_enabled( $user->ID ) ) {
 					return;
 				}
 				if ( ! self::role_requires_2fa( (array) $user->roles, self::settings()['enforced_roles'] ) ) {
@@ -493,7 +509,7 @@ class IS_2FA {
 		return IS_Guard::run(
 			'2fa_login',
 			function () use ( $user ) {
-				if ( ! ( $user instanceof WP_User ) || ! self::is_enabled( $user->ID ) ) {
+				if ( ! ( $user instanceof WP_User ) || ! self::any_method_enabled( $user->ID ) ) {
 					return $user;
 				}
 

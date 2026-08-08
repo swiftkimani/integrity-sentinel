@@ -2,7 +2,7 @@
     "assets/css/is-admin.css": "dc98babc9080f08055c0468e7cc6445a01eb045de5c76b9130b77f11df9f307b",
     "assets/js/is-admin.js": "41d816eb9de4ab5373f9227d56ef429f818055a37f330a5d626d6ad5589f7829",
     "includes/class-is-2fa.php": "05f1d747ed20725fb062be417eb5efde7c3dd0e122b6d18e8ea3d90f7443e1ff",
-    "includes/class-is-admin.php": "f24086dd9de68b97254020d0f4420d1b0a11c54ab4edb5d89af7621f358771bb",
+    "includes/class-is-admin.php": "f18b10d73e46b7f6e302b4b6ebaec553ee70ee2df209d7d56e65bc14f4b33e63",
     "includes/class-is-ajax.php": "82665a71299d7a7ce0fcfe3dc32a409d0df6779ffd59907cb6c57018c9b8f760",
     "includes/class-is-api-key-hygiene.php": "14a16ab3783d04ed4707b40ae5efebb08a8b2937d66b645e213c25cfa3e4397e",
     "includes/class-is-asset-cloak.php": "c9ff15cc8dac7c308a8a0b6c7eae3ce29c4b9c365e6339a782e0a533aa29337b",

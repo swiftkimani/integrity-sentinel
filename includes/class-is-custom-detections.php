@@ -229,8 +229,23 @@ class IS_Custom_Detections {
 				}
 
 				if ( $changed ) {
-					$settings['rules'] = $rules;
-					update_option( 'is_custom_detections_settings', $settings, false );
+					// Re-read the option fresh and merge in just the
+					// last_fired stamps (matched by index + substring)
+					// rather than writing back the whole snapshot taken
+					// at the top of this tick -- otherwise a rule edit
+					// saved by an admin while this tick was running would
+					// get silently clobbered by our stale copy.
+					$current = self::settings();
+					foreach ( $rules as $index => $rule ) {
+						if ( (int) $now !== (int) $rule['last_fired'] ) {
+							continue;
+						}
+						if ( isset( $current['rules'][ $index ]['action_substring'] )
+							&& $current['rules'][ $index ]['action_substring'] === $rule['action_substring'] ) {
+							$current['rules'][ $index ]['last_fired'] = $now;
+						}
+					}
+					update_option( 'is_custom_detections_settings', $current, false );
 				}
 			}
 		);

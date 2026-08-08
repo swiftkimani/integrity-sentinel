@@ -12,7 +12,7 @@
     "includes/class-is-cli.php": "37d3924de8cecfa5c321c2d7f8960b6e93916a159c6b3d06fe45c5ff56fbb155",
     "includes/class-is-core-checksums.php": "f5a8514d6f4efed98afc4237dda6116a801126ca3c47bd393712f206ad1f25e7",
     "includes/class-is-cron.php": "64af5bf4ecec86aa28306158461bfe58e3bad0d4760878d998792aefa95883e8",
-    "includes/class-is-custom-detections.php": "a275fa120444f450813212eaf9efc627e493e787caa85c41effe24f4e21d93e8",
+    "includes/class-is-custom-detections.php": "c4eb3472c84d8c7b9a582b2dfcc4fe659867e51d7aceff0591ae2894ffa26cc7",
     "includes/class-is-db.php": "55642f9b38f118d7c7b9b55d3a8dd328b82b44aadec572ad85ceeae181b9620c",
     "includes/class-is-deception.php": "7676522d34295034715136bcaf05197d6cd42104824a69a89d2a4037afdc0ba5",
     "includes/class-is-detections.php": "0a095b49776384e39f0b88507c026d5498f6abccc4af4622adf7eceaf58bc68e",

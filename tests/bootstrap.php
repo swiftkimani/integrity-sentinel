@@ -83,3 +83,4 @@ require_once dirname( __DIR__ ) . '/includes/class-is-bas.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-domain-intel.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-ransomware-canary.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-secrets.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-webauthn.php';

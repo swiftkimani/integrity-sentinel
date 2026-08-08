@@ -394,6 +394,9 @@ class IS_2FA {
 			</tr>
 		</table>
 		<?php
+		if ( class_exists( 'IS_WebAuthn' ) && IS_WebAuthn::is_available() ) {
+			IS_WebAuthn::instance()->render_profile_section( $user );
+		}
 	}
 
 	/**
@@ -436,13 +439,45 @@ class IS_2FA {
 	// ===================================================================
 
 	/**
-	 * Transient key used to store pending-login state for a verification token.
+	 * Transient key used to store pending-login state for a verification
+	 * token. Public: IS_WebAuthn shares this same pending-login state
+	 * (keyed by the same token) as an alternative verification method
+	 * alongside TOTP/recovery codes.
 	 *
 	 * @param string $token Random per-attempt token issued in maybe_intercept_login().
 	 * @return string
 	 */
-	private static function pending_key( $token ) {
+	public static function pending_key( $token ) {
 		return 'is_2fa_pending_' . $token;
+	}
+
+	/**
+	 * The pending-login state for a verification token, or false if none/expired.
+	 *
+	 * @param string $token Pending-login token.
+	 * @return array{user_id:int,remember:bool,attempts:int}|false
+	 */
+	public static function get_pending( $token ) {
+		return get_transient( self::pending_key( $token ) );
+	}
+
+	/**
+	 * Completes a verified pending login: clears the pending state, sets
+	 * the auth cookie/current user, and fires 'wp_login' -- the same
+	 * completion path regardless of which method (TOTP, recovery code,
+	 * WebAuthn) did the verifying. Callers are responsible for their own
+	 * audit-log entry (the event name differs per method) and redirect.
+	 *
+	 * @param string $token    Pending-login token, so its transient can be cleared.
+	 * @param int    $user_id  Verified user ID.
+	 * @param bool   $remember Whether to set a long-lived auth cookie.
+	 */
+	public static function complete_pending_login( $token, $user_id, $remember ) {
+		delete_transient( self::pending_key( $token ) );
+		$user = get_userdata( $user_id );
+		wp_set_auth_cookie( $user_id, $remember );
+		wp_set_current_user( $user_id );
+		do_action( 'wp_login', $user->user_login, $user );
 	}
 
 	/**
@@ -515,7 +550,7 @@ class IS_2FA {
 				}
 
 				if ( 'POST' !== sanitize_text_field( wp_unslash( $_SERVER['REQUEST_METHOD'] ?? '' ) ) ) {
-					$this->render_verify_form( $token, isset( $_GET['redirect_to'] ) ? wp_unslash( $_GET['redirect_to'] ) : '', false ); // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only, echoed via esc_url() in render_verify_form()
+					$this->render_verify_form( $token, (int) $pending['user_id'], isset( $_GET['redirect_to'] ) ? wp_unslash( $_GET['redirect_to'] ) : '', false ); // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only, echoed via esc_url() in render_verify_form()
 					exit;
 				}
 
@@ -549,16 +584,11 @@ class IS_2FA {
 					$pending['attempts'] = (int) $pending['attempts'] + 1;
 					set_transient( self::pending_key( $token ), $pending, self::PENDING_TTL );
 					IS_Audit_Log::record( '2fa_code_rejected', array( 'user_id' => $user_id ) );
-					$this->render_verify_form( $token, isset( $_POST['redirect_to'] ) ? wp_unslash( $_POST['redirect_to'] ) : '', true ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only, echoed via esc_url() in render_verify_form()
+					$this->render_verify_form( $token, $user_id, isset( $_POST['redirect_to'] ) ? wp_unslash( $_POST['redirect_to'] ) : '', true ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only, echoed via esc_url() in render_verify_form()
 					exit;
 				}
 
-				delete_transient( self::pending_key( $token ) );
-
-				$user = get_userdata( $user_id );
-				wp_set_auth_cookie( $user_id, ! empty( $pending['remember'] ) );
-				wp_set_current_user( $user_id );
-				do_action( 'wp_login', $user->user_login, $user );
+				self::complete_pending_login( $token, $user_id, ! empty( $pending['remember'] ) );
 
 				IS_Audit_Log::record( '2fa_login_verified', array( 'user_id' => $user_id ) );
 
@@ -574,11 +604,15 @@ class IS_2FA {
 	 * form for the given pending-login token.
 	 *
 	 * @param string $token       Pending-login token, echoed back as a hidden field via the form action.
+	 * @param int    $user_id     User the pending login belongs to (so a WebAuthn challenge, if applicable, can be offered).
 	 * @param string $redirect_to Where to send the user after a successful verification.
 	 * @param bool   $show_error  Whether to display the "invalid code" error notice.
 	 */
-	private function render_verify_form( $token, $redirect_to, $show_error ) {
+	private function render_verify_form( $token, $user_id, $redirect_to, $show_error ) {
 		login_header( __( 'Verification', 'integrity-sentinel' ), '', $show_error ? new WP_Error( 'is_2fa_invalid', __( 'Invalid code. Please try again.', 'integrity-sentinel' ) ) : '' );
+		if ( class_exists( 'IS_WebAuthn' ) && IS_WebAuthn::is_available() && IS_WebAuthn::has_credentials( $user_id ) ) {
+			IS_WebAuthn::instance()->render_login_challenge_button( $token, $redirect_to );
+		}
 		?>
 		<form name="is_2fa_form" method="post" action="
 		<?php

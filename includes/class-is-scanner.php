@@ -70,6 +70,17 @@ class IS_Scanner {
 	 */
 	private function walker( array $settings ) {
 		$excludes = array_filter( array_map( 'trim', explode( "\n", $settings['excluded_paths'] ) ) );
+
+		// Always exclude this plugin's own vendor/ directory (vetted,
+		// Composer-installed third-party code for the WebAuthn feature) --
+		// heuristic/secrets-scanning vetted vendor code is generically
+		// noisy/low-value, and it was never part of the self-integrity
+		// manifest's scope either (see bin/make-manifest.php).
+		$vendor_relative = IS_File_Walker::relative_to_abspath( IS_PLUGIN_DIR . 'vendor' );
+		if ( null !== $vendor_relative ) {
+			$excludes[] = $vendor_relative . '/*';
+		}
+
 		return new IS_File_Walker( $excludes );
 	}
 

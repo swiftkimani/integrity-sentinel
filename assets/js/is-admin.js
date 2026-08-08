@@ -559,11 +559,52 @@
 		}
 	}
 
+	// ---------------------------------------------------------------
+	// Attack Simulation (BAS self-test)
+	// ---------------------------------------------------------------
+
+	function initBasSelfTest() {
+		var btn = document.getElementById('is-run-bas-test');
+		var results = document.getElementById('is-bas-results');
+		if (!btn || !results) {
+			return;
+		}
+
+		btn.addEventListener('click', function () {
+			btn.disabled = true;
+			btn.textContent = 'Running…';
+			results.innerHTML = '';
+
+			post('is_run_bas_self_test').then(function (res) {
+				btn.disabled = false;
+				btn.textContent = 'Run self-test';
+
+				if (!res || !res.success || !res.data || !res.data.results) {
+					results.innerHTML = '<p>Self-test failed to run.</p>';
+					return;
+				}
+
+				var rows = res.data.results.map(function (r) {
+					var badge = r.passed ? '<span class="is-badge is-badge-low">Pass</span>' : '<span class="is-badge is-badge-high">Fail</span>';
+					var controlBadge = r.control_enabled ? '' : ' <span class="is-badge is-badge-medium">Control disabled</span>';
+					return '<tr><td>' + badge + controlBadge + '</td><td>' + r.label + '</td><td>' + r.detail + '</td></tr>';
+				}).join('');
+
+				results.innerHTML = '<table class="widefat striped"><thead><tr><th>Result</th><th>Control</th><th>Detail</th></tr></thead><tbody>' + rows + '</tbody></table>';
+			}).catch(function () {
+				btn.disabled = false;
+				btn.textContent = 'Run self-test';
+				results.innerHTML = '<p>Self-test failed to run.</p>';
+			});
+		});
+	}
+
 	document.addEventListener('DOMContentLoaded', function () {
 		initScanButton();
 		initFindingActions();
 		initFindingModal();
 		initQuarantineDeleteToggles();
 		initLoginDesignPreview();
+		initBasSelfTest();
 	});
 })();

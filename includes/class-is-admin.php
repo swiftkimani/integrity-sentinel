@@ -58,6 +58,8 @@ class IS_Admin {
 		add_action( 'admin_post_is_download_sbom', array( $this, 'handle_download_sbom' ) );
 		add_action( 'admin_post_is_regenerate_canary_token', array( $this, 'handle_regenerate_canary_token' ) );
 		add_action( 'admin_post_is_export_compliance_report', array( $this, 'handle_export_compliance_report' ) );
+		add_action( 'admin_post_is_prune_audit_log', array( $this, 'handle_prune_audit_log' ) );
+		add_action( 'admin_post_is_export_incident_bundle', array( $this, 'handle_export_incident_bundle' ) );
 	}
 
 	/**
@@ -83,6 +85,7 @@ class IS_Admin {
 		add_submenu_page( 'integrity-sentinel', __( 'REST API', 'integrity-sentinel' ), __( 'REST API', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-rest', array( $this, 'render_rest_api' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Audit Log', 'integrity-sentinel' ), __( 'Audit Log', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-audit', array( $this, 'render_audit_log' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Reports & Compliance', 'integrity-sentinel' ), __( 'Reports & Compliance', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-reports', array( $this, 'render_reports' ) );
+		add_submenu_page( 'integrity-sentinel', __( 'Attack Simulation', 'integrity-sentinel' ), __( 'Attack Simulation', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-simulate', array( $this, 'render_simulate' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Settings', 'integrity-sentinel' ), __( 'Settings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-settings', array( $this, 'render_settings' ) );
 
 		// Every page above stays fully registered with add_submenu_page()
@@ -179,6 +182,12 @@ class IS_Admin {
 				'label' => __( 'Reports & Compliance', 'integrity-sentinel' ),
 				'slug'  => 'integrity-sentinel-reports',
 				'icon'  => 'dashicons-media-text',
+			),
+			array(
+				'key'   => 'simulate',
+				'label' => __( 'Attack Simulation', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-simulate',
+				'icon'  => 'dashicons-shield',
 			),
 			array(
 				'key'   => 'settings',
@@ -425,6 +434,22 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_api_key_hygiene_settings' ),
 			)
 		);
+		register_setting(
+			'is_audit_log_settings_group',
+			'is_audit_log_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_audit_log_settings' ),
+			)
+		);
+		register_setting(
+			'is_custom_detections_settings_group',
+			'is_custom_detections_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_custom_detections_settings' ),
+			)
+		);
 	}
 
 	/**
@@ -526,6 +551,38 @@ class IS_Admin {
 					'ban_minutes' => $out['ban_minutes'],
 				)
 			);
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the audit log retention settings.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_audit_log_settings( $input ) {
+		$old = IS_Audit_Log::settings();
+		$out = array( 'retention_days' => max( 0, min( 3650, (int) ( $input['retention_days'] ?? 0 ) ) ) );
+
+		if ( $out['retention_days'] !== $old['retention_days'] ) {
+			IS_Audit_Log::record( 'audit_log_settings_changed', array( 'retention_days' => $out['retention_days'] ) );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the custom-detection-rules bulk textarea into the settings' `rules` array.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_custom_detections_settings( $input ) {
+		$old = IS_Custom_Detections::settings();
+		$out = array( 'rules' => IS_Custom_Detections::parse_rules_text( $input['rules_text'] ?? '' ) );
+
+		if ( count( $out['rules'] ) !== count( $old['rules'] ) ) {
+			IS_Audit_Log::record( 'custom_detections_changed', array( 'rule_count' => count( $out['rules'] ) ) );
 		}
 
 		return $out;
@@ -1397,6 +1454,68 @@ class IS_Admin {
 	}
 
 	/**
+	 * Bundles one finding with everything else that happened in the
+	 * audit log around the same time into a downloadable Markdown
+	 * report -- a starting point for incident write-ups, not a claim
+	 * that everything in the window is necessarily related.
+	 */
+	public function handle_export_incident_bundle() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
+		}
+		check_admin_referer( 'is_incident_bundle_action' );
+
+		$finding_id = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via check_admin_referer()
+		$finding    = $finding_id ? IS_DB::instance()->get_finding( $finding_id ) : null;
+		if ( ! $finding ) {
+			wp_safe_redirect( add_query_arg( 'is_error', rawurlencode( __( 'Finding not found.', 'integrity-sentinel' ) ), admin_url( 'admin.php?page=integrity-sentinel-findings' ) ) );
+			exit;
+		}
+
+		$first_seen = strtotime( $finding['first_seen'] );
+		$window     = HOUR_IN_SECONDS;
+		$related    = IS_Audit_Log::entries_between(
+			gmdate( 'Y-m-d H:i:s', $first_seen - $window ),
+			gmdate( 'Y-m-d H:i:s', $first_seen + $window ),
+			200
+		);
+
+		$lines   = array();
+		$lines[] = '# ' . sprintf( /* translators: %d: finding ID */ __( 'Incident bundle — finding #%d', 'integrity-sentinel' ), $finding_id );
+		$lines[] = '_' . gmdate( 'Y-m-d H:i' ) . ' UTC_';
+		$lines[] = '';
+		$lines[] = '## ' . __( 'Finding', 'integrity-sentinel' );
+		$lines[] = '- **' . __( 'File', 'integrity-sentinel' ) . ':** `' . $finding['file_path'] . '`';
+		$lines[] = '- **' . __( 'Severity', 'integrity-sentinel' ) . ':** ' . $finding['severity'];
+		$lines[] = '- **' . __( 'Rule', 'integrity-sentinel' ) . ':** ' . $finding['rule_id'];
+		$lines[] = '- **' . __( 'First seen', 'integrity-sentinel' ) . ':** ' . $finding['first_seen'];
+		$lines[] = '- **' . __( 'Last seen', 'integrity-sentinel' ) . ':** ' . $finding['last_seen'];
+		if ( ! empty( $finding['file_hash'] ) ) {
+			$lines[] = '- **' . __( 'File hash (SHA-256)', 'integrity-sentinel' ) . ':** `' . $finding['file_hash'] . '`';
+		}
+		$lines[] = '- **' . __( 'Detail', 'integrity-sentinel' ) . ':** ' . $finding['detail'];
+		$lines[] = '';
+		$lines[] = '## ' . sprintf(
+			/* translators: %d: window size in minutes on either side */
+			__( 'Audit log entries within %d minutes of first_seen', 'integrity-sentinel' ),
+			(int) ( $window / MINUTE_IN_SECONDS )
+		);
+		if ( empty( $related ) ) {
+			$lines[] = __( 'None.', 'integrity-sentinel' );
+		} else {
+			foreach ( $related as $entry ) {
+				$lines[] = sprintf( '- `%1$s` %2$s (%3$s, %4$s) — %5$s', $entry['created_at'], $entry['action'], $entry['user_login'], $entry['ip'], (string) $entry['detail'] );
+			}
+		}
+
+		nocache_headers();
+		header( 'Content-Type: text/markdown; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename="integrity-sentinel-incident-' . $finding_id . '-' . gmdate( 'Y-m-d' ) . '.md"' );
+		echo implode( "\n", $lines ) . "\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- plain-text Markdown file download, not HTML output
+		exit;
+	}
+
+	/**
 	 * Regenerates the deception module's canary token.
 	 */
 	public function handle_regenerate_canary_token() {
@@ -1838,6 +1957,13 @@ class IS_Admin {
 										<button type="submit" class="button-link"><?php esc_html_e( 'Check reputation', 'integrity-sentinel' ); ?></button>
 									</form>
 								<?php endif; ?>
+								|
+								<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+									<?php wp_nonce_field( 'is_incident_bundle_action' ); ?>
+									<input type="hidden" name="action" value="is_export_incident_bundle">
+									<input type="hidden" name="finding_id" value="<?php echo esc_attr( $f['id'] ); ?>">
+									<button type="submit" class="button-link"><?php esc_html_e( 'Export incident bundle', 'integrity-sentinel' ); ?></button>
+								</form>
 							</td>
 						</tr>
 					<?php endforeach; ?>
@@ -3427,9 +3553,66 @@ class IS_Admin {
 					?>
 				</div></div>
 			<?php endif; ?>
+
+			<h2><?php esc_html_e( 'Retention', 'integrity-sentinel' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'This log grows forever by default. Set a retention window to automatically remove rows older than it once a day, or leave at 0 to keep everything.', 'integrity-sentinel' ); ?></p>
+			<?php $audit_settings = IS_Audit_Log::settings(); ?>
+			<form method="post" action="options.php">
+				<?php settings_fields( 'is_audit_log_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="is_audit_retention_days"><?php esc_html_e( 'Keep entries for (days)', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<input type="number" min="0" max="3650" id="is_audit_retention_days" name="is_audit_log_settings[retention_days]" value="<?php echo esc_attr( $audit_settings['retention_days'] ); ?>" class="small-text">
+							<p class="description"><?php esc_html_e( '0 = keep forever.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save retention settings', 'integrity-sentinel' ) ); ?>
+			</form>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<?php wp_nonce_field( 'is_audit_log_action' ); ?>
+				<input type="hidden" name="action" value="is_prune_audit_log">
+				<?php submit_button( __( 'Prune now', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+			</form>
+
+			<h2><?php esc_html_e( 'Custom detection rules', 'integrity-sentinel' ); ?></h2>
+			<p class="description">
+				<?php esc_html_e( 'Every other detection this plugin raises is built in. Define your own: "if this action slug appears N times within M minutes, alert me" — a lightweight, Sigma-style rule over the log above.', 'integrity-sentinel' ); ?>
+			</p>
+			<?php $custom_detections = IS_Custom_Detections::settings(); ?>
+			<form method="post" action="options.php">
+				<?php settings_fields( 'is_custom_detections_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="is_custom_rules_text"><?php esc_html_e( 'Rules', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<textarea id="is_custom_rules_text" name="is_custom_detections_settings[rules_text]" rows="6" class="large-text code" placeholder="login_failed | 20 | 15 | high"><?php echo esc_textarea( IS_Custom_Detections::format_rules_text( $custom_detections['rules'] ) ); ?></textarea>
+							<p class="description"><?php esc_html_e( 'One rule per line: action-slug substring | threshold count | window in minutes | severity (info/low/medium/high/critical). Evaluated every 5 minutes; each rule has a cooldown equal to its own window so a sustained burst only alerts once per window, not on every check.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save detection rules', 'integrity-sentinel' ) ); ?>
+			</form>
 		</div>
 		<?php
 		$this->render_shell_close();
+	}
+
+	/**
+	 * Prunes audit log entries older than the configured retention window and redirects back to the Audit Log page.
+	 */
+	public function handle_prune_audit_log() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
+		}
+		check_admin_referer( 'is_audit_log_action' );
+
+		$deleted = IS_Audit_Log::maybe_prune();
+		IS_Audit_Log::record( 'audit_log_pruned', array( 'deleted' => $deleted ) );
+
+		wp_safe_redirect( admin_url( 'admin.php?page=integrity-sentinel-audit' ) );
+		exit;
 	}
 
 	// -----------------------------------------------------------------
@@ -3603,6 +3786,31 @@ class IS_Admin {
 				<input type="hidden" name="action" value="is_export_compliance_report">
 				<?php submit_button( __( 'Export report (Markdown)', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
 			</form>
+		</div>
+		<?php
+		$this->render_shell_close();
+	}
+
+	/**
+	 * Renders the Attack Simulation page: a single "Run self-test"
+	 * button that fires the Breach & Attack Simulation module (via
+	 * AJAX) and shows the pass/fail table it returns.
+	 */
+	public function render_simulate() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$this->render_shell_open( 'simulate' );
+		?>
+		<div class="wrap is-wrap">
+			<h1><?php esc_html_e( 'Attack Simulation', 'integrity-sentinel' ); ?></h1>
+			<div class="notice notice-info inline">
+				<p>
+					<?php esc_html_e( 'This is synthetic, logic-level verification, not a live-traffic replay: it feeds each defensive control the kind of input an attacker would produce and confirms your code correctly recognizes it. It makes no external requests, targets nothing but this plugin\'s own code, and never touches any real user\'s stored data (a throwaway 2FA secret is generated and discarded in-memory for the 2FA check; every other check uses synthetic values).', 'integrity-sentinel' ); ?>
+				</p>
+			</div>
+			<button type="button" class="button button-primary" id="is-run-bas-test"><?php esc_html_e( 'Run self-test', 'integrity-sentinel' ); ?></button>
+			<div id="is-bas-results" style="margin-top:16px;"></div>
 		</div>
 		<?php
 		$this->render_shell_close();

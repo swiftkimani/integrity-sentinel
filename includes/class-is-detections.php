@@ -114,11 +114,12 @@ class IS_Detections {
 	 * Records the detection to the audit log and, for high/critical
 	 * severity, alerts through IS_Notifications too.
 	 *
-	 * @param string $rule_id Key into rules().
-	 * @param array  $detail  Extra context (ip, route, counts, ...).
+	 * @param string $rule_id   Key into rules(), or an ad hoc identifier (e.g. an admin-defined custom detection rule) paired with $overrides.
+	 * @param array  $detail    Extra context (ip, route, counts, ...).
+	 * @param array  $overrides Optional {label,severity,category} overriding rule()'s lookup -- for callers (e.g. IS_Custom_Detections) whose rule isn't in the static registry() and whose severity is admin-chosen, not hardcoded here.
 	 */
-	public static function fire( $rule_id, array $detail = array() ) {
-		$rule = self::rule( $rule_id );
+	public static function fire( $rule_id, array $detail = array(), array $overrides = array() ) {
+		$rule = array_merge( self::rule( $rule_id ), $overrides );
 
 		IS_Audit_Log::record(
 			'detect_' . $rule_id,

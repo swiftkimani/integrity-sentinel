@@ -575,9 +575,23 @@ class IS_Admin {
 	/**
 	 * Sanitizes the custom-detection-rules bulk textarea into the settings' `rules` array.
 	 *
-	 * @param array $input Raw settings submitted from the form.
+	 * Must be idempotent: WordPress core re-runs a registered option's
+	 * sanitize_callback a second time, on its own output, the very first
+	 * time that option is ever saved (update_option() delegates to
+	 * add_option() for a brand-new option, and both apply
+	 * sanitize_option()). Since this callback's input shape (`rules_text`,
+	 * a string) differs from its output shape (`rules`, an array), a
+	 * second pass with no `rules_text` key would otherwise be
+	 * misread as an empty submission and silently wipe out a rule set
+	 * that was just saved.
+	 *
+	 * @param array $input Raw settings submitted from the form, or (on a re-sanitize pass) this method's own prior output.
 	 */
 	public function sanitize_custom_detections_settings( $input ) {
+		if ( ! isset( $input['rules_text'] ) && isset( $input['rules'] ) ) {
+			return $input;
+		}
+
 		$old = IS_Custom_Detections::settings();
 		$out = array( 'rules' => IS_Custom_Detections::parse_rules_text( $input['rules_text'] ?? '' ) );
 

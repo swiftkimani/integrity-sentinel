@@ -1,4 +1,10 @@
 <?php
+/**
+ * Hotlink protection for the uploads directory, enforced via a marker-delimited rule block in uploads/.htaccess.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -18,10 +24,16 @@ class IS_Hotlink {
 	const BLOCK_END   = '# END Integrity Sentinel Hotlink Protection';
 	const EXTENSIONS  = 'jpe?g|png|gif|webp|svg|bmp|ico';
 
+	/**
+	 * Default settings, used to fill in anything missing from the stored option.
+	 */
 	public static function default_settings() {
 		return array( 'allowed_domains' => '' );
 	}
 
+	/**
+	 * Stored settings, merged over default_settings().
+	 */
 	public static function settings() {
 		return wp_parse_args( get_option( 'is_hotlink_settings', array() ), self::default_settings() );
 	}
@@ -30,6 +42,7 @@ class IS_Hotlink {
 	 * Pure: parses a textarea's worth of domains, one per line. Tolerates
 	 * a pasted full URL (strips scheme and any path) and "# note" comments.
 	 *
+	 * @param string $text Raw textarea contents.
 	 * @return string[]
 	 */
 	public static function parse_domain_list( $text ) {
@@ -51,6 +64,9 @@ class IS_Hotlink {
 	 * many browsers/apps, feed readers, and RSS/social-share previews
 	 * that strip the referer) -- this blocks cross-SITE embedding, not
 	 * anonymous access.
+	 *
+	 * @param string   $home_host       Site's home host, always allowed.
+	 * @param string[] $allowed_domains Additional domains allowed to hotlink.
 	 */
 	public static function block_rules( $home_host, array $allowed_domains ) {
 		$hosts         = array_map(
@@ -71,6 +87,13 @@ class IS_Hotlink {
 			. self::BLOCK_END . "\n";
 	}
 
+	/**
+	 * Pure: the nginx config snippet equivalent of block_rules(), for
+	 * manual setup on servers where the .htaccess block has no effect.
+	 *
+	 * @param string   $home_host       Site's home host, always allowed.
+	 * @param string[] $allowed_domains Additional domains allowed to hotlink.
+	 */
 	public static function nginx_snippet( $home_host, array $allowed_domains ) {
 		$valid = array_merge( array( $home_host ), $allowed_domains );
 		return 'location ~* \\.(' . self::EXTENSIONS . ") {\n"
@@ -79,11 +102,17 @@ class IS_Hotlink {
 			. '}';
 	}
 
+	/**
+	 * Path to the uploads directory's .htaccess file.
+	 */
 	public static function htaccess_path() {
 		$uploads = wp_upload_dir();
 		return trailingslashit( $uploads['basedir'] ) . '.htaccess';
 	}
 
+	/**
+	 * Whether the hotlink-protection rule block is currently present in the uploads .htaccess file.
+	 */
 	public static function active() {
 		$path = self::htaccess_path();
 		if ( ! file_exists( $path ) || ! is_readable( $path ) ) {
@@ -92,7 +121,11 @@ class IS_Hotlink {
 		return false !== strpos( (string) file_get_contents( $path ), self::BLOCK_BEGIN ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 	}
 
-	/** @return true|WP_Error */
+	/**
+	 * Writes the hotlink-protection rule block into the uploads .htaccess file, if not already active.
+	 *
+	 * @return true|WP_Error
+	 */
 	public static function apply() {
 		if ( self::active() ) {
 			return true;
@@ -112,7 +145,11 @@ class IS_Hotlink {
 		return true;
 	}
 
-	/** @return true|WP_Error */
+	/**
+	 * Removes the hotlink-protection rule block from the uploads .htaccess file, if currently active.
+	 *
+	 * @return true|WP_Error
+	 */
 	public static function remove() {
 		if ( ! self::active() ) {
 			return true;

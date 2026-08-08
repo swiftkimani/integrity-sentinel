@@ -1,4 +1,10 @@
 <?php
+/**
+ * Email and webhook alerting for Integrity Sentinel.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -10,9 +16,23 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Notifications {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Notifications|null
+	 */
 	private static $instance = null;
-	const SEVERITY_ORDER = array( 'critical' => 4, 'high' => 3, 'medium' => 2, 'low' => 1, 'info' => 0 );
+	const SEVERITY_ORDER     = array(
+		'critical' => 4,
+		'high'     => 3,
+		'medium'   => 2,
+		'low'      => 1,
+		'info'     => 0,
+	);
 
+	/**
+	 * Returns the singleton instance, creating it on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -20,6 +40,9 @@ class IS_Notifications {
 		return self::$instance;
 	}
 
+	/**
+	 * The scan settings, which also hold the alert email and webhook URL.
+	 */
 	private function settings() {
 		return get_option( 'is_scan_settings', array() );
 	}
@@ -29,6 +52,8 @@ class IS_Notifications {
 	 * of the webhook is an OUT-OF-BAND copy of security events: alerts
 	 * that land somewhere off this server can't be deleted by whoever
 	 * compromised it.
+	 *
+	 * @param array $payload Event data to post as JSON.
 	 */
 	public function post_webhook( array $payload ) {
 		$settings = $this->settings();
@@ -78,9 +103,15 @@ class IS_Notifications {
 		);
 	}
 
+	/**
+	 * Sends the alert email/webhook for a finished scan run, if it has
+	 * findings at or above the configured severity threshold.
+	 *
+	 * @param int $run_id The scan run to report on.
+	 */
 	public function maybe_send_alert( $run_id ) {
-		$settings = get_option( 'is_scan_settings', array() );
-		$to       = $settings['alert_email'] ?? get_option( 'admin_email' );
+		$settings  = get_option( 'is_scan_settings', array() );
+		$to        = $settings['alert_email'] ?? get_option( 'admin_email' );
 		$threshold = $settings['alert_on_severity'] ?? 'high';
 
 		if ( empty( $to ) || ! is_email( $to ) ) {

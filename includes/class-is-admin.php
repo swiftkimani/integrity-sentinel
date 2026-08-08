@@ -1,12 +1,30 @@
 <?php
+/**
+ * Admin UI: settings pages, dashboard, and admin-post handlers for Integrity Sentinel.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * Registers the admin menu, settings, and page renderers, and handles the
+ * plugin's admin-post actions (quarantine, hardening, canary token, etc).
+ */
 class IS_Admin {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Admin|null
+	 */
 	private static $instance = null;
 
+	/**
+	 * Returns the singleton instance, creating it on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -15,6 +33,9 @@ class IS_Admin {
 		return self::$instance;
 	}
 
+	/**
+	 * Wires up the admin menu, settings, enqueue, and admin-post action hooks.
+	 */
 	private function hooks() {
 		add_action( 'admin_menu', array( $this, 'add_menu' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
@@ -26,12 +47,22 @@ class IS_Admin {
 		add_action( 'admin_post_is_remove_exec_block', array( $this, 'handle_remove_exec_block' ) );
 		add_action( 'admin_post_is_apply_hotlink_block', array( $this, 'handle_apply_hotlink_block' ) );
 		add_action( 'admin_post_is_remove_hotlink_block', array( $this, 'handle_remove_hotlink_block' ) );
+		add_action( 'admin_post_is_apply_asset_cloak', array( $this, 'handle_apply_asset_cloak' ) );
+		add_action( 'admin_post_is_remove_asset_cloak', array( $this, 'handle_remove_asset_cloak' ) );
 		add_action( 'admin_post_is_reset_module_health', array( $this, 'handle_reset_module_health' ) );
 		add_action( 'admin_post_is_quarantine_finding', array( $this, 'handle_quarantine_finding' ) );
 		add_action( 'admin_post_is_quarantine_restore', array( $this, 'handle_quarantine_restore' ) );
 		add_action( 'admin_post_is_quarantine_delete', array( $this, 'handle_quarantine_delete' ) );
+		add_action( 'admin_post_is_check_ip_reputation', array( $this, 'handle_check_ip_reputation' ) );
+		add_action( 'admin_post_is_check_hash_reputation', array( $this, 'handle_check_hash_reputation' ) );
+		add_action( 'admin_post_is_download_sbom', array( $this, 'handle_download_sbom' ) );
+		add_action( 'admin_post_is_regenerate_canary_token', array( $this, 'handle_regenerate_canary_token' ) );
+		add_action( 'admin_post_is_export_compliance_report', array( $this, 'handle_export_compliance_report' ) );
 	}
 
+	/**
+	 * Registers the top-level admin menu page and its submenu pages.
+	 */
 	public function add_menu() {
 		add_menu_page(
 			__( 'Integrity Sentinel', 'integrity-sentinel' ),
@@ -48,8 +79,10 @@ class IS_Admin {
 		add_submenu_page( 'integrity-sentinel', __( 'Hardening', 'integrity-sentinel' ), __( 'Hardening', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-hardening', array( $this, 'render_hardening' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Access Control', 'integrity-sentinel' ), __( 'Access Control', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-access', array( $this, 'render_access_control' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Login Security', 'integrity-sentinel' ), __( 'Login Security', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-login', array( $this, 'render_login_security' ) );
+		add_submenu_page( 'integrity-sentinel', __( 'Login Design', 'integrity-sentinel' ), __( 'Login Design', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-login-design', array( $this, 'render_login_design' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'REST API', 'integrity-sentinel' ), __( 'REST API', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-rest', array( $this, 'render_rest_api' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Audit Log', 'integrity-sentinel' ), __( 'Audit Log', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-audit', array( $this, 'render_audit_log' ) );
+		add_submenu_page( 'integrity-sentinel', __( 'Reports & Compliance', 'integrity-sentinel' ), __( 'Reports & Compliance', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-reports', array( $this, 'render_reports' ) );
 		add_submenu_page( 'integrity-sentinel', __( 'Settings', 'integrity-sentinel' ), __( 'Settings', 'integrity-sentinel' ), 'manage_options', 'integrity-sentinel-settings', array( $this, 'render_settings' ) );
 
 		// Every page above stays fully registered with add_submenu_page()
@@ -124,6 +157,12 @@ class IS_Admin {
 				'icon'  => 'dashicons-admin-users',
 			),
 			array(
+				'key'   => 'login-design',
+				'label' => __( 'Login Design', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-login-design',
+				'icon'  => 'dashicons-admin-appearance',
+			),
+			array(
 				'key'   => 'rest',
 				'label' => __( 'REST API', 'integrity-sentinel' ),
 				'slug'  => 'integrity-sentinel-rest',
@@ -134,6 +173,12 @@ class IS_Admin {
 				'label' => __( 'Audit Log', 'integrity-sentinel' ),
 				'slug'  => 'integrity-sentinel-audit',
 				'icon'  => 'dashicons-list-view',
+			),
+			array(
+				'key'   => 'reports',
+				'label' => __( 'Reports & Compliance', 'integrity-sentinel' ),
+				'slug'  => 'integrity-sentinel-reports',
+				'icon'  => 'dashicons-media-text',
 			),
 			array(
 				'key'   => 'settings',
@@ -149,6 +194,8 @@ class IS_Admin {
 	 * replacing reliance on WP's now-hidden submenu flyout) plus the
 	 * content pane every render_*() method's markup lives inside.
 	 * Always paired with render_shell_close().
+	 *
+	 * @param string $active_key Nav item key of the currently displayed page.
 	 */
 	private function render_shell_open( $active_key ) {
 		?>
@@ -178,6 +225,9 @@ class IS_Admin {
 		<?php
 	}
 
+	/**
+	 * Closes the app shell markup opened by render_shell_open().
+	 */
 	private function render_shell_close() {
 		?>
 			</main>
@@ -185,12 +235,22 @@ class IS_Admin {
 		<?php
 	}
 
+	/**
+	 * Enqueues the admin CSS/JS (and the media library, on the Login Design
+	 * page) for this plugin's own admin screens.
+	 *
+	 * @param string $hook Current admin page hook suffix.
+	 */
 	public function enqueue( $hook ) {
 		if ( strpos( $hook, 'integrity-sentinel' ) === false ) {
 			return;
 		}
 		wp_enqueue_style( 'is-admin', IS_PLUGIN_URL . 'assets/css/is-admin.css', array(), IS_VERSION );
 		wp_enqueue_script( 'is-admin', IS_PLUGIN_URL . 'assets/js/is-admin.js', array(), IS_VERSION, true );
+
+		if ( isset( $_GET['page'] ) && 'integrity-sentinel-login-design' === $_GET['page'] ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only page-identity check, not processing input
+			wp_enqueue_media();
+		}
 		wp_localize_script(
 			'is-admin',
 			'ISAdmin',
@@ -202,12 +262,16 @@ class IS_Admin {
 					'scanComplete'   => __( 'Scan complete.', 'integrity-sentinel' ),
 					'scanError'      => __( 'Scan error:', 'integrity-sentinel' ),
 					'scanInProgress' => __( 'A scan is already in progress — showing its status.', 'integrity-sentinel' ),
+					/* translators: %d: number of plugins that could not be checksum-verified */
 					'notCheckable'   => __( '%d plugin(s) could not be checksum-verified (not hosted on WordPress.org).', 'integrity-sentinel' ),
 				),
 			)
 		);
 	}
 
+	/**
+	 * Registers all Settings API groups/options and their sanitize callbacks.
+	 */
 	public function register_settings() {
 		register_setting(
 			'is_settings_group',
@@ -250,6 +314,14 @@ class IS_Admin {
 			)
 		);
 		register_setting(
+			'is_login_design_settings_group',
+			'is_login_design_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_login_design_settings' ),
+			)
+		);
+		register_setting(
 			'is_hotlink_settings_group',
 			'is_hotlink_settings',
 			array(
@@ -289,8 +361,292 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_2fa_settings' ),
 			)
 		);
+		register_setting(
+			'is_session_settings_group',
+			'is_session_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_session_settings' ),
+			)
+		);
+		register_setting(
+			'is_asset_cloak_settings_group',
+			'is_asset_cloak_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_asset_cloak_settings' ),
+			)
+		);
+		register_setting(
+			'is_password_policy_settings_group',
+			'is_password_policy_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_password_policy_settings' ),
+			)
+		);
+		register_setting(
+			'is_vulnerability_scanner_settings_group',
+			'is_vulnerability_scanner_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_vulnerability_scanner_settings' ),
+			)
+		);
+		register_setting(
+			'is_signatures_settings_group',
+			'is_signatures_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_signatures_settings' ),
+			)
+		);
+		register_setting(
+			'is_threat_intel_settings_group',
+			'is_threat_intel_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_threat_intel_settings' ),
+			)
+		);
+		register_setting(
+			'is_deception_settings_group',
+			'is_deception_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_deception_settings' ),
+			)
+		);
+		register_setting(
+			'is_api_key_hygiene_settings_group',
+			'is_api_key_hygiene_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_api_key_hygiene_settings' ),
+			)
+		);
 	}
 
+	/**
+	 * Sanitizes the vulnerability scanner settings (WPScan API key and enabled flag).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_vulnerability_scanner_settings( $input ) {
+		$old     = IS_Vulnerability_Scanner::settings();
+		$api_key = isset( $input['api_key'] ) ? sanitize_text_field( trim( (string) $input['api_key'] ) ) : '';
+		$enabled = empty( $input['enabled'] ) ? 0 : 1;
+
+		if ( $enabled && '' === $api_key ) {
+			add_settings_error(
+				'is_vulnerability_scanner_settings',
+				'is_vuln_scanner_key_required',
+				__( 'A WPScan API key is required to enable vulnerability scanning — it was left off. Get a free key at wpscan.com/register.', 'integrity-sentinel' )
+			);
+			$enabled = 0;
+		}
+
+		$out = array(
+			'enabled' => $enabled,
+			'api_key' => $api_key,
+		);
+
+		if ( $out !== $old ) {
+			// The key itself isn't logged -- only whether the feature's on.
+			IS_Audit_Log::record( 'vulnerability_scanner_settings_changed', array( 'enabled' => $out['enabled'] ) );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the known-malware-signature settings (enabled flag and hash list).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_signatures_settings( $input ) {
+		$old = IS_Signatures::settings();
+		$out = array(
+			'enabled' => empty( $input['enabled'] ) ? 0 : 1,
+			'hashes'  => sanitize_textarea_field( $input['hashes'] ?? '' ),
+		);
+
+		if ( $out !== $old ) {
+			IS_Audit_Log::record(
+				'signatures_settings_changed',
+				array(
+					'enabled' => $out['enabled'],
+					'count'   => count( IS_Signatures::parse_hash_list( $out['hashes'] ) ),
+				)
+			);
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the threat intelligence settings (AbuseIPDB/VirusTotal keys and enabled flag).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_threat_intel_settings( $input ) {
+		$old = IS_Threat_Intel::settings();
+		$out = array(
+			'enabled'        => empty( $input['enabled'] ) ? 0 : 1,
+			'abuseipdb_key'  => isset( $input['abuseipdb_key'] ) ? sanitize_text_field( trim( (string) $input['abuseipdb_key'] ) ) : '',
+			'virustotal_key' => isset( $input['virustotal_key'] ) ? sanitize_text_field( trim( (string) $input['virustotal_key'] ) ) : '',
+		);
+
+		if ( $out['enabled'] !== $old['enabled'] ) {
+			// The keys themselves aren't logged -- only whether the feature's on.
+			IS_Audit_Log::record( 'threat_intel_settings_changed', array( 'enabled' => $out['enabled'] ) );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the deception (canary/honeypot) settings, preserving the canary token as read-only.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_deception_settings( $input ) {
+		$old = IS_Deception::settings();
+		$out = array(
+			'enabled'      => empty( $input['enabled'] ) ? 0 : 1,
+			'ban_minutes'  => max( 1, min( 10080, (int) ( $input['ban_minutes'] ?? 60 ) ) ),
+			'canary_token' => $old['canary_token'], // never editable from this form -- only via the dedicated regenerate action.
+		);
+
+		if ( $out['enabled'] !== $old['enabled'] || $out['ban_minutes'] !== $old['ban_minutes'] ) {
+			IS_Audit_Log::record(
+				'deception_settings_changed',
+				array(
+					'enabled'     => $out['enabled'],
+					'ban_minutes' => $out['ban_minutes'],
+				)
+			);
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the password policy settings (minimum length and character requirements).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_password_policy_settings( $input ) {
+		$old = IS_Password_Policy::settings();
+		$out = array(
+			'enabled'            => empty( $input['enabled'] ) ? 0 : 1,
+			'min_length'         => max( 4, min( 64, (int) ( $input['min_length'] ?? 12 ) ) ),
+			'require_mixed_case' => empty( $input['require_mixed_case'] ) ? 0 : 1,
+			'require_number'     => empty( $input['require_number'] ) ? 0 : 1,
+			'require_symbol'     => empty( $input['require_symbol'] ) ? 0 : 1,
+		);
+
+		if ( $out !== $old ) {
+			IS_Audit_Log::record( 'password_policy_changed', array( 'settings' => $out ) );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the session security settings (new-IP alerting and impossible-travel detection).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_session_settings( $input ) {
+		$old = IS_Sessions::settings();
+		$out = array(
+			'alert_on_new_ip'                  => empty( $input['alert_on_new_ip'] ) ? 0 : 1,
+			'impossible_travel_detection'      => empty( $input['impossible_travel_detection'] ) ? 0 : 1,
+			'impossible_travel_window_minutes' => max( 5, min( 1440, (int) ( $input['impossible_travel_window_minutes'] ?? 60 ) ) ),
+		);
+
+		$changed = array();
+		foreach ( $out as $key => $value ) {
+			if ( (string) ( $old[ $key ] ?? '' ) !== (string) $value ) {
+				$changed[] = $key;
+			}
+		}
+		if ( $changed ) {
+			IS_Audit_Log::record( 'session_settings_changed', array( 'keys' => $changed ) );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the API key hygiene settings (staleness threshold in days).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_api_key_hygiene_settings( $input ) {
+		$old = IS_Api_Key_Hygiene::settings();
+		$out = array( 'stale_after_days' => max( 1, min( 3650, (int) ( $input['stale_after_days'] ?? 90 ) ) ) );
+
+		if ( $out['stale_after_days'] !== $old['stale_after_days'] ) {
+			IS_Audit_Log::record( 'api_key_hygiene_settings_changed', array( 'stale_after_days' => $out['stale_after_days'] ) );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the asset cloak settings (URL alias and enabled flag), validating the alias.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_asset_cloak_settings( $input ) {
+		$old     = IS_Asset_Cloak::settings();
+		$raw     = isset( $input['alias'] ) ? $input['alias'] : '';
+		$alias   = IS_Asset_Cloak::sanitize_alias( $raw );
+		$enabled = empty( $input['enabled'] ) ? 0 : 1;
+
+		if ( '' !== trim( (string) $raw ) && '' === $alias ) {
+			add_settings_error(
+				'is_asset_cloak_settings',
+				'is_asset_cloak_alias_invalid',
+				__( 'That alias could not be used (empty after removing invalid characters, or it collides with a WordPress core path). The previous alias was kept.', 'integrity-sentinel' )
+			);
+			$alias = $old['alias'];
+		}
+
+		if ( $enabled && '' === $alias ) {
+			add_settings_error(
+				'is_asset_cloak_settings',
+				'is_asset_cloak_alias_required',
+				__( 'Set an alias before enabling the asset cloak — it was left off.', 'integrity-sentinel' )
+			);
+			$enabled = 0;
+		}
+
+		$out = array(
+			'enabled' => $enabled,
+			'alias'   => $alias,
+		);
+
+		if ( $out !== $old ) {
+			IS_Audit_Log::record(
+				'asset_cloak_settings_changed',
+				array(
+					'from' => $old,
+					'to'   => $out,
+				)
+			);
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the two-factor authentication settings (which roles have 2FA enforced).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_2fa_settings( $input ) {
 		$old         = IS_2FA::settings();
 		$valid_roles = array_keys( wp_roles()->get_names() );
@@ -304,12 +660,21 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the REST API hardening settings (enumeration protection, rate limiting, allowed routes).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_rest_api_settings( $input ) {
 		$old = IS_Rest_API::settings();
 		$out = array(
 			'block_user_enumeration'   => empty( $input['block_user_enumeration'] ) ? 0 : 1,
 			'restrict_unauthenticated' => empty( $input['restrict_unauthenticated'] ) ? 0 : 1,
 			'allowed_routes'           => sanitize_textarea_field( $input['allowed_routes'] ?? '' ),
+			'rate_limit'               => max( 0, min( 10000, (int) ( $input['rate_limit'] ?? 120 ) ) ),
+			'enumeration_detection'    => empty( $input['enumeration_detection'] ) ? 0 : 1,
+			'enumeration_threshold'    => max( 5, min( 1000, (int) ( $input['enumeration_threshold'] ?? 20 ) ) ),
+			'block_on_enumeration'     => empty( $input['block_on_enumeration'] ) ? 0 : 1,
 		);
 
 		$changed = array();
@@ -325,6 +690,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the REST posts endpoint settings (enabled flag and rate limit).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_rest_posts_settings( $input ) {
 		$old = IS_Rest_Posts::settings();
 		$out = array(
@@ -345,6 +715,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the hotlink protection settings (allowed referrer domains).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_hotlink_settings( $input ) {
 		$old = IS_Hotlink::settings();
 		$out = array( 'allowed_domains' => sanitize_textarea_field( $input['allowed_domains'] ?? '' ) );
@@ -359,6 +734,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the bot blocking settings (enabled flag and blocked bot list).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_bot_block_settings( $input ) {
 		$old = IS_Bot_Block::settings();
 		$out = array(
@@ -379,6 +759,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the login rename settings (custom login slug and admin subdomain host).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_login_rename_settings( $input ) {
 		$old  = IS_Login::rename_settings();
 		$raw  = isset( $input['login_slug'] ) ? $input['login_slug'] : '';
@@ -403,7 +788,21 @@ class IS_Admin {
 			$slug = $old['login_slug'];
 		}
 
-		$out = array( 'login_slug' => $slug );
+		$raw_host = isset( $input['login_host'] ) ? $input['login_host'] : '';
+		$host     = IS_Login::sanitize_login_host( $raw_host );
+		if ( '' !== trim( (string) $raw_host ) && '' === $host ) {
+			add_settings_error(
+				'is_login_rename_settings',
+				'is_login_host_invalid',
+				__( 'That admin subdomain did not look like a valid hostname (e.g. admin.example.com) and was left blank.', 'integrity-sentinel' )
+			);
+		}
+
+		$out = array(
+			'login_slug' => $slug,
+			'login_host' => $host,
+		);
+
 		if ( (string) $old['login_slug'] !== (string) $out['login_slug'] ) {
 			IS_Audit_Log::record(
 				'login_slug_changed',
@@ -413,17 +812,140 @@ class IS_Admin {
 				)
 			);
 		}
+		if ( (string) $old['login_host'] !== (string) $out['login_host'] ) {
+			IS_Audit_Log::record(
+				'login_host_changed',
+				array(
+					'from' => $old['login_host'],
+					'to'   => $out['login_host'],
+				)
+			);
+		}
 
 		return $out;
 	}
 
+	/**
+	 * The actual input -> clean-array transform, with no side effects
+	 * (no settings_errors, no audit log) -- shared by the real save path
+	 * (sanitize_login_design_settings() below, which adds those side
+	 * effects around it) and IS_Ajax::preview_login_design(), which needs
+	 * an identically-validated draft for the unsaved-changes preview
+	 * without either of those side effects firing for something that was
+	 * never actually saved.
+	 *
+	 * @param array $input Raw settings submitted from the form (or preview draft).
+	 * @param array $old   The currently saved login design settings.
+	 */
+	public function sanitize_login_design_input( $input, $old ) {
+		$defaults = IS_Login_Design::default_settings();
+
+		$template = isset( $input['template'] ) && array_key_exists( $input['template'], IS_Login_Design::templates() )
+			? $input['template']
+			: $defaults['template'];
+
+		$raw_color = isset( $input['primary_color'] ) ? $input['primary_color'] : '';
+		$color     = sanitize_hex_color( $raw_color );
+		if ( '' !== trim( (string) $raw_color ) && null === $color ) {
+			$color = $old['primary_color'];
+		} elseif ( null === $color ) {
+			$color = $defaults['primary_color'];
+		}
+
+		$raw_logo = isset( $input['logo_url'] ) ? trim( (string) $input['logo_url'] ) : '';
+		$logo     = '' !== $raw_logo ? esc_url_raw( $raw_logo ) : '';
+		if ( '' !== $logo && ! IS_Login_Design::is_http_url( $logo ) ) {
+			$logo = '';
+		}
+
+		$raw_hero_image = isset( $input['hero_image_url'] ) ? trim( (string) $input['hero_image_url'] ) : '';
+		$hero_image     = '' !== $raw_hero_image ? esc_url_raw( $raw_hero_image ) : '';
+		if ( '' !== $hero_image && ! IS_Login_Design::is_http_url( $hero_image ) ) {
+			$hero_image = '';
+		}
+
+		$hero_position = isset( $input['hero_position'] ) && in_array( $input['hero_position'], IS_Login_Design::hero_positions(), true )
+			? $input['hero_position']
+			: 'left';
+
+		$carousel_indicator = isset( $input['carousel_indicator'] ) && array_key_exists( $input['carousel_indicator'], IS_Login_Design::carousel_indicators() )
+			? $input['carousel_indicator']
+			: $defaults['carousel_indicator'];
+
+		// One image URL per line (a textarea, not a repeater UI -- simple
+		// and robust). Only used by the Carousel template; harmless if
+		// present for any other template, since only Carousel ever reads
+		// it (IS_Login_Design::carousel_images()).
+		$raw_gallery_lines = isset( $input['hero_gallery'] ) ? preg_split( '/[\r\n]+/', (string) $input['hero_gallery'] ) : array();
+		$hero_gallery      = array();
+		foreach ( $raw_gallery_lines as $line ) {
+			$line = trim( $line );
+			if ( '' === $line ) {
+				continue;
+			}
+			$url = esc_url_raw( $line );
+			if ( IS_Login_Design::is_http_url( $url ) ) {
+				$hero_gallery[] = $url;
+			}
+		}
+		$hero_gallery = array_slice( array_values( array_unique( $hero_gallery ) ), 0, 8 );
+
+		return array(
+			'template'           => $template,
+			'logo_url'           => $logo,
+			'primary_color'      => $color,
+			'border_radius'      => IS_Login_Design::clamp_radius( isset( $input['border_radius'] ) ? $input['border_radius'] : $defaults['border_radius'] ),
+			'hero_position'      => $hero_position,
+			'hero_heading'       => isset( $input['hero_heading'] ) ? sanitize_text_field( $input['hero_heading'] ) : '',
+			'hero_subheading'    => isset( $input['hero_subheading'] ) ? sanitize_text_field( $input['hero_subheading'] ) : '',
+			'hero_image_url'     => $hero_image,
+			'hero_gallery'       => $hero_gallery,
+			'carousel_indicator' => $carousel_indicator,
+			'hide_branding'      => empty( $input['hide_branding'] ) ? 0 : 1,
+			'custom_css'         => IS_Login_Design::sanitize_css_for_style_tag( isset( $input['custom_css'] ) ? (string) $input['custom_css'] : '' ),
+			'custom_html'        => isset( $input['custom_html'] ) ? wp_kses_post( $input['custom_html'] ) : '',
+		);
+	}
+
+	/**
+	 * Sanitizes the login design settings via sanitize_login_design_input(), then
+	 * records the change and surfaces a settings error for an invalid accent color.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_login_design_settings( $input ) {
+		$old = IS_Login_Design::settings();
+		$out = $this->sanitize_login_design_input( $input, $old );
+
+		$raw_color = isset( $input['primary_color'] ) ? $input['primary_color'] : '';
+		if ( '' !== trim( (string) $raw_color ) && null === sanitize_hex_color( $raw_color ) ) {
+			add_settings_error(
+				'is_login_design_settings',
+				'is_login_design_color_invalid',
+				__( 'That accent color was not a valid hex color (e.g. #6366f1) and was left unchanged.', 'integrity-sentinel' )
+			);
+		}
+
+		if ( $out !== $old ) {
+			IS_Audit_Log::record( 'login_design_changed', array() );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the login throttle settings (attempt limits, lockout, credential-stuffing threshold).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_login_throttle_settings( $input ) {
 		$old = IS_Login::throttle_settings();
 		$out = array(
-			'enabled'         => empty( $input['enabled'] ) ? 0 : 1,
-			'max_attempts'    => max( 3, min( 20, (int) ( $input['max_attempts'] ?? 5 ) ) ),
-			'window_minutes'  => max( 1, min( 1440, (int) ( $input['window_minutes'] ?? 15 ) ) ),
-			'lockout_minutes' => max( 1, min( 1440, (int) ( $input['lockout_minutes'] ?? 15 ) ) ),
+			'enabled'                       => empty( $input['enabled'] ) ? 0 : 1,
+			'max_attempts'                  => max( 3, min( 20, (int) ( $input['max_attempts'] ?? 5 ) ) ),
+			'window_minutes'                => max( 1, min( 1440, (int) ( $input['window_minutes'] ?? 15 ) ) ),
+			'lockout_minutes'               => max( 1, min( 1440, (int) ( $input['lockout_minutes'] ?? 15 ) ) ),
+			'credential_stuffing_threshold' => max( 2, min( 100, (int) ( $input['credential_stuffing_threshold'] ?? 8 ) ) ),
 		);
 
 		$changed = array();
@@ -439,6 +961,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the IP allow/deny list settings, including trusted proxy ranges and header.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_ip_list_settings( $input ) {
 		$old = IS_IP_List::settings();
 
@@ -471,10 +998,25 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the security header hardening settings, including the raw CSP header value.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_hardening_settings( $input ) {
 		$old = IS_Headers::settings();
 		$out = array();
 		foreach ( array_keys( IS_Headers::default_settings() ) as $key ) {
+			if ( 'content_security_policy' === $key ) {
+				// A free-text header value, not a toggle -- stripped of
+				// tags and any literal line breaks (a raw newline here
+				// would be HTTP header-injection input; header() itself
+				// already rejects that, but there's no reason to store an
+				// invalid value in the first place).
+				$raw         = isset( $input[ $key ] ) ? (string) $input[ $key ] : '';
+				$out[ $key ] = trim( (string) preg_replace( '/[\r\n]+/', ' ', sanitize_textarea_field( $raw ) ) );
+				continue;
+			}
 			$out[ $key ] = empty( $input[ $key ] ) ? 0 : 1;
 		}
 
@@ -491,6 +1033,11 @@ class IS_Admin {
 		return $out;
 	}
 
+	/**
+	 * Sanitizes the main scan settings, and emails the previous alert address if it changed.
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
 	public function sanitize_settings( $input ) {
 		$old = get_option( 'is_scan_settings', array() );
 
@@ -548,22 +1095,51 @@ class IS_Admin {
 		return $out;
 	}
 
-	// -----------------------------------------------------------------
-	// Hardening actions (plain admin-post forms, no JS dependency)
-	// -----------------------------------------------------------------
-
+	/**
+	 * Hardening actions (plain admin-post forms, no JS dependency).
+	 *
+	 * Applies the uploads-directory execution block.
+	 */
 	public function handle_apply_uploads_block() {
 		$this->guard_hardening_action();
 		$result = IS_Hardening::apply_uploads_block();
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Applies the asset cloak .htaccess rewrite rule using the saved alias.
+	 */
+	public function handle_apply_asset_cloak() {
+		$this->guard_hardening_action();
+		$alias = IS_Asset_Cloak::settings()['alias'];
+		if ( '' === $alias ) {
+			$this->redirect_hardening( __( 'Save an alias below before applying the .htaccess rule.', 'integrity-sentinel' ) );
+		}
+		$result = IS_Asset_Cloak::apply_block( $alias );
+		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
+	}
+
+	/**
+	 * Removes the asset cloak .htaccess rewrite rule.
+	 */
+	public function handle_remove_asset_cloak() {
+		$this->guard_hardening_action();
+		$result = IS_Asset_Cloak::remove_block();
+		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
+	}
+
+	/**
+	 * Removes the uploads-directory execution block.
+	 */
 	public function handle_remove_uploads_block() {
 		$this->guard_hardening_action();
 		$result = IS_Hardening::remove_uploads_block();
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Applies the execution block for the POSTed target directory key.
+	 */
 	public function handle_apply_exec_block() {
 		$this->guard_hardening_action();
 		$target = $this->resolve_exec_block_target();
@@ -571,6 +1147,9 @@ class IS_Admin {
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Removes the execution block for the POSTed target directory key.
+	 */
 	public function handle_remove_exec_block() {
 		$this->guard_hardening_action();
 		$target = $this->resolve_exec_block_target();
@@ -585,23 +1164,32 @@ class IS_Admin {
 	 * .htaccess-write primitive.
 	 */
 	private function resolve_exec_block_target() {
-		$key     = isset( $_POST['target'] ) ? sanitize_key( wp_unslash( $_POST['target'] ) ) : '';
+		$key     = isset( $_POST['target'] ) ? sanitize_key( wp_unslash( $_POST['target'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- both callers verify via guard_hardening_action() -> check_admin_referer() before calling this
 		$targets = IS_Hardening::exec_block_targets();
 		return isset( $targets[ $key ] ) ? $targets[ $key ] : null;
 	}
 
+	/**
+	 * Applies the hotlink protection .htaccess rewrite rule.
+	 */
 	public function handle_apply_hotlink_block() {
 		$this->guard_hardening_action();
 		$result = IS_Hotlink::apply();
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Removes the hotlink protection .htaccess rewrite rule.
+	 */
 	public function handle_remove_hotlink_block() {
 		$this->guard_hardening_action();
 		$result = IS_Hotlink::remove();
 		$this->redirect_hardening( is_wp_error( $result ) ? $result->get_error_message() : '' );
 	}
 
+	/**
+	 * Resets a paused module's health/failure state so it resumes running.
+	 */
 	public function handle_reset_module_health() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -618,6 +1206,9 @@ class IS_Admin {
 		exit;
 	}
 
+	/**
+	 * Verifies capability and nonce for a quarantine admin-post action, dying if either fails.
+	 */
 	private function guard_quarantine_action() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -625,10 +1216,13 @@ class IS_Admin {
 		check_admin_referer( 'is_quarantine_action' );
 	}
 
+	/**
+	 * Moves the POSTed finding into quarantine.
+	 */
 	public function handle_quarantine_finding() {
 		$this->guard_quarantine_action();
 
-		$finding_id = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0;
+		$finding_id = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_quarantine_action() -> check_admin_referer()
 		$finding    = $finding_id ? IS_DB::instance()->get_finding( $finding_id ) : null;
 		$url        = admin_url( 'admin.php?page=integrity-sentinel-findings' );
 
@@ -647,25 +1241,36 @@ class IS_Admin {
 		exit;
 	}
 
+	/**
+	 * Restores the POSTed quarantined file to its original location.
+	 */
 	public function handle_quarantine_restore() {
 		$this->guard_quarantine_action();
-		$id     = isset( $_POST['quarantine_id'] ) ? (int) $_POST['quarantine_id'] : 0;
+		$id     = isset( $_POST['quarantine_id'] ) ? (int) $_POST['quarantine_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_quarantine_action() -> check_admin_referer()
 		$result = $id ? IS_Quarantine::restore( $id, get_current_user_id() ) : new WP_Error( 'is_quarantine_invalid', __( 'Invalid request.', 'integrity-sentinel' ) );
 		$this->redirect_quarantine( $result );
 	}
 
+	/**
+	 * Permanently deletes the POSTed quarantined file, requiring an explicit confirmation checkbox.
+	 */
 	public function handle_quarantine_delete() {
 		$this->guard_quarantine_action();
 
-		if ( empty( $_POST['is_quarantine_confirm'] ) ) {
+		if ( empty( $_POST['is_quarantine_confirm'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_quarantine_action() -> check_admin_referer()
 			$this->redirect_quarantine( new WP_Error( 'is_quarantine_not_confirmed', __( 'You must check the confirmation box to permanently delete a file.', 'integrity-sentinel' ) ) );
 		}
 
-		$id     = isset( $_POST['quarantine_id'] ) ? (int) $_POST['quarantine_id'] : 0;
+		$id     = isset( $_POST['quarantine_id'] ) ? (int) $_POST['quarantine_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_quarantine_action() -> check_admin_referer()
 		$result = $id ? IS_Quarantine::delete_permanently( $id, get_current_user_id() ) : new WP_Error( 'is_quarantine_invalid', __( 'Invalid request.', 'integrity-sentinel' ) );
 		$this->redirect_quarantine( $result );
 	}
 
+	/**
+	 * Redirects back to the Quarantine page, appending an error message if the action failed.
+	 *
+	 * @param mixed $result Result of the quarantine action; a WP_Error on failure.
+	 */
 	private function redirect_quarantine( $result ) {
 		$url = admin_url( 'admin.php?page=integrity-sentinel-quarantine' );
 		if ( is_wp_error( $result ) ) {
@@ -675,6 +1280,9 @@ class IS_Admin {
 		exit;
 	}
 
+	/**
+	 * Verifies capability and nonce for a hardening admin-post action, dying if either fails.
+	 */
 	private function guard_hardening_action() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
@@ -682,6 +1290,11 @@ class IS_Admin {
 		check_admin_referer( 'is_hardening_action' );
 	}
 
+	/**
+	 * Redirects back to the Hardening page, appending an error message if one was given.
+	 *
+	 * @param string $error_message Optional error message to append as a query arg.
+	 */
 	private function redirect_hardening( $error_message = '' ) {
 		$url = add_query_arg( array( 'page' => 'integrity-sentinel-hardening' ), admin_url( 'admin.php' ) );
 		if ( $error_message ) {
@@ -691,10 +1304,119 @@ class IS_Admin {
 		exit;
 	}
 
-	// -----------------------------------------------------------------
-	// Dashboard
-	// -----------------------------------------------------------------
+	/**
+	 * Threat intelligence: on-demand reputation checks + SBOM download.
+	 *
+	 * Verifies capability and nonce for a threat-intel admin-post action, dying if either fails.
+	 */
+	private function guard_threat_intel_action() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
+		}
+		check_admin_referer( 'is_threat_intel_action' );
+	}
 
+	/**
+	 * Runs on the admin's explicit click, from the Audit Log page --
+	 * unlike a live login/REST request, a page load taking an extra
+	 * second for one external HTTP round-trip is an acceptable, expected
+	 * cost here. See IS_Threat_Intel's class doc for why this is never
+	 * wired into a live request path instead.
+	 */
+	public function handle_check_ip_reputation() {
+		$this->guard_threat_intel_action();
+		$ip  = isset( $_POST['ip'] ) ? sanitize_text_field( wp_unslash( $_POST['ip'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_threat_intel_action() -> check_admin_referer()
+		$url = admin_url( 'admin.php?page=integrity-sentinel-audit' );
+
+		if ( '' === $ip || false === filter_var( $ip, FILTER_VALIDATE_IP ) ) {
+			wp_safe_redirect( add_query_arg( 'is_error', rawurlencode( __( 'Invalid IP address.', 'integrity-sentinel' ) ), $url ) );
+			exit;
+		}
+
+		$result = ( new IS_Threat_Intel() )->lookup_ip( $ip );
+		if ( is_wp_error( $result ) ) {
+			$url = add_query_arg( 'is_error', rawurlencode( $result->get_error_message() ), $url );
+		} else {
+			IS_Audit_Log::record( 'threat_intel_ip_checked', array_merge( array( 'ip' => $ip ), $result ) );
+			$summary = sprintf(
+				/* translators: 1: IP address, 2: AbuseIPDB confidence score 0-100, 3: total report count */
+				__( 'AbuseIPDB: %1$s scored %2$d/100 (%3$d reports).', 'integrity-sentinel' ),
+				$ip,
+				$result['score'],
+				$result['total_reports']
+			);
+			$url = add_query_arg( 'is_ti_result', rawurlencode( $summary ), $url );
+		}
+		wp_safe_redirect( $url );
+		exit;
+	}
+
+	/**
+	 * Looks up the POSTed finding's file hash against VirusTotal and redirects back with a result summary.
+	 */
+	public function handle_check_hash_reputation() {
+		$this->guard_threat_intel_action();
+		$finding_id = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard_threat_intel_action() -> check_admin_referer()
+		$finding    = $finding_id ? IS_DB::instance()->get_finding( $finding_id ) : null;
+		$url        = admin_url( 'admin.php?page=integrity-sentinel-findings' );
+
+		if ( ! $finding || empty( $finding['file_hash'] ) ) {
+			wp_safe_redirect( add_query_arg( 'is_error', rawurlencode( __( 'This finding has no file hash to check.', 'integrity-sentinel' ) ), $url ) );
+			exit;
+		}
+
+		$result = ( new IS_Threat_Intel() )->lookup_hash( $finding['file_hash'] );
+		if ( is_wp_error( $result ) ) {
+			$url = add_query_arg( 'is_error', rawurlencode( $result->get_error_message() ), $url );
+		} else {
+			IS_Audit_Log::record( 'threat_intel_hash_checked', array_merge( array( 'finding_id' => $finding_id ), $result ) );
+			$summary = ! empty( $result['unknown'] )
+				? __( 'VirusTotal: this hash is not in their database.', 'integrity-sentinel' )
+				: sprintf(
+					/* translators: 1: number of engines flagging as malicious, 2: number flagging as suspicious */
+					__( 'VirusTotal: %1$d engine(s) flagged this as malicious, %2$d as suspicious.', 'integrity-sentinel' ),
+					$result['malicious'],
+					$result['suspicious']
+				);
+			$url = add_query_arg( 'is_ti_result', rawurlencode( $summary ), $url );
+		}
+		wp_safe_redirect( $url );
+		exit;
+	}
+
+	/** Streams the current software inventory as a JSON download -- not a redirect, since there's nothing to redirect back to. */
+	public function handle_download_sbom() {
+		$this->guard_threat_intel_action();
+		$document = IS_SBOM::to_document( IS_SBOM::generate() );
+
+		nocache_headers();
+		header( 'Content-Type: application/json; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename="integrity-sentinel-sbom-' . gmdate( 'Y-m-d' ) . '.json"' );
+		echo wp_json_encode( $document, JSON_PRETTY_PRINT );
+		exit;
+	}
+
+	/**
+	 * Regenerates the deception module's canary token.
+	 */
+	public function handle_regenerate_canary_token() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
+		}
+		check_admin_referer( 'is_deception_action' );
+
+		IS_Deception::regenerate_canary_token();
+		IS_Audit_Log::record( 'canary_token_regenerated', array() );
+
+		wp_safe_redirect( admin_url( 'admin.php?page=integrity-sentinel-access' ) );
+		exit;
+	}
+
+	/**
+	 * Dashboard.
+	 *
+	 * Renders the dashboard page: severity counts, the latest scan run, and any run in progress.
+	 */
 	public function render_dashboard() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -863,8 +1585,8 @@ class IS_Admin {
 			),
 			array(
 				'label' => __( 'Login URL', 'integrity-sentinel' ),
-				'ok'    => '' !== $login_rename['login_slug'],
-				'text'  => '' !== $login_rename['login_slug'] ? __( 'Hidden', 'integrity-sentinel' ) : __( 'Default', 'integrity-sentinel' ),
+				'ok'    => '' !== $login_rename['login_slug'] || '' !== $login_rename['login_host'],
+				'text'  => ( '' !== $login_rename['login_slug'] || '' !== $login_rename['login_host'] ) ? __( 'Hidden', 'integrity-sentinel' ) : __( 'Default', 'integrity-sentinel' ),
 				'url'   => $login_url,
 			),
 			array(
@@ -902,6 +1624,9 @@ class IS_Admin {
 		);
 	}
 
+	/**
+	 * Renders the dashboard's security status grid (REST, quarantine, etc. at-a-glance items).
+	 */
 	private function render_security_status() {
 		?>
 		<h2><?php esc_html_e( 'Security status', 'integrity-sentinel' ); ?></h2>
@@ -986,10 +1711,11 @@ class IS_Admin {
 		<?php
 	}
 
-	// -----------------------------------------------------------------
-	// Findings
-	// -----------------------------------------------------------------
-
+	/**
+	 * Findings.
+	 *
+	 * Renders the Findings page: a filterable, paginated list of scan findings.
+	 */
 	public function render_findings() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -1008,21 +1734,27 @@ class IS_Admin {
 			'offset'   => ( $paged - 1 ) * $per_page,
 		);
 
-		$findings = $db->get_findings( $args );
-		$total    = $db->count_findings(
+		$findings    = $db->get_findings( $args );
+		$total       = $db->count_findings(
 			array(
 				'status'   => $args['status'],
 				'severity' => $severity,
 			)
 		);
-		$pages    = max( 1, (int) ceil( $total / $per_page ) );
-		$error    = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$pages       = max( 1, (int) ceil( $total / $per_page ) );
+		$error       = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
+		$ti_result   = isset( $_GET['is_ti_result'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_ti_result'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
+		$ti_settings = IS_Threat_Intel::settings();
+		$ti_ready    = ! empty( $ti_settings['enabled'] ) && '' !== trim( (string) $ti_settings['virustotal_key'] );
 		$this->render_shell_open( 'findings' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Findings', 'integrity-sentinel' ); ?></h1>
 			<?php if ( $error ) : ?>
 				<div class="notice notice-error"><p><?php echo esc_html( $error ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( $ti_result ) : ?>
+				<div class="notice notice-info"><p><?php echo esc_html( $ti_result ); ?></p></div>
 			<?php endif; ?>
 			<?php if ( isset( $_GET['is_quarantined'] ) ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only flag from our own redirect ?>
 				<div class="notice notice-success"><p><?php esc_html_e( 'File moved to quarantine. It has not been deleted — review it under Quarantine.', 'integrity-sentinel' ); ?></p></div>
@@ -1097,6 +1829,15 @@ class IS_Admin {
 								<?php else : ?>
 									<em><?php echo esc_html( ucfirst( $f['status'] ) ); ?></em>
 								<?php endif; ?>
+								<?php if ( $ti_ready && ! empty( $f['file_hash'] ) ) : ?>
+									|
+									<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+										<?php wp_nonce_field( 'is_threat_intel_action' ); ?>
+										<input type="hidden" name="action" value="is_check_hash_reputation">
+										<input type="hidden" name="finding_id" value="<?php echo esc_attr( $f['id'] ); ?>">
+										<button type="submit" class="button-link"><?php esc_html_e( 'Check reputation', 'integrity-sentinel' ); ?></button>
+									</form>
+								<?php endif; ?>
 							</td>
 						</tr>
 					<?php endforeach; ?>
@@ -1152,7 +1893,7 @@ class IS_Admin {
 		$status   = isset( $_GET['status'] ) ? sanitize_key( wp_unslash( $_GET['status'] ) ) : 'quarantined'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only filter, not a state change
 		$paged    = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		$per_page = 30;
-		$error    = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$error    = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
 
 		$items = $db->get_quarantine_items( $status, $per_page, ( $paged - 1 ) * $per_page );
 		$total = $db->count_quarantine_items( $status );
@@ -1263,16 +2004,17 @@ class IS_Admin {
 		$this->render_shell_close();
 	}
 
-	// -----------------------------------------------------------------
-	// Hardening
-	// -----------------------------------------------------------------
-
+	/**
+	 * Hardening.
+	 *
+	 * Renders the Hardening page: uploads/exec blocks, hotlink protection, asset cloak, headers.
+	 */
 	public function render_hardening() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
 		$active = IS_Hardening::uploads_block_active();
-		$error  = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only message set by our own redirect
+		$error  = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
 		$this->render_shell_open( 'hardening' );
 		?>
 		<div class="wrap is-wrap">
@@ -1317,6 +2059,14 @@ class IS_Admin {
 
 			<?php $this->render_http_hardening_section(); ?>
 
+			<?php $this->render_asset_cloak_section(); ?>
+
+			<?php $this->render_vulnerability_scanner_section(); ?>
+
+			<?php $this->render_signatures_section(); ?>
+
+			<?php $this->render_threat_intel_section(); ?>
+
 			<h2><?php esc_html_e( 'Hardening checks', 'integrity-sentinel' ); ?></h2>
 			<p>
 				<?php esc_html_e( 'Every scan also audits site configuration: the file editor, debug output, auth salts, world-writable paths, exposed .git/.env/debug.log files, backup archives in the webroot, administrator accounts, plugins closed on WordPress.org, and more. Results appear under Findings alongside file-integrity issues.', 'integrity-sentinel' ); ?>
@@ -1333,7 +2083,7 @@ class IS_Admin {
 	 */
 	private function render_other_exec_block_targets() {
 		$targets = IS_Hardening::exec_block_targets();
-		unset( $targets['uploads'] ); // covered by its own dedicated section above
+		unset( $targets['uploads'] ); // covered by its own dedicated section above.
 		if ( empty( $targets ) ) {
 			return;
 		}
@@ -1481,6 +2231,16 @@ class IS_Admin {
 					</td>
 				</tr>
 				<tr>
+					<th scope="row"><?php esc_html_e( 'Hide WordPress fingerprints', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_hardening_settings[hide_meta_fingerprints]" value="1" <?php checked( $settings['hide_meta_fingerprints'], 1 ); ?>>
+							<?php esc_html_e( 'Remove the head links and REST-discovery header that advertise WordPress-specific endpoints on every page (wlwmanifest, shortlink, the api.w.org discovery link/header).', 'integrity-sentinel' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'Safe for any site — purely stops advertising these URLs; it does not disable anything, so nothing that already knows the URL is affected.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+				<tr>
 					<th scope="row"><?php esc_html_e( 'Disable XML-RPC', 'integrity-sentinel' ); ?></th>
 					<td>
 						<label>
@@ -1500,16 +2260,283 @@ class IS_Admin {
 						<p class="description"><?php esc_html_e( 'Only enable this if the site has no RSS subscribers or feed-consuming integrations.', 'integrity-sentinel' ); ?></p>
 					</td>
 				</tr>
+				<tr>
+					<th scope="row"><label for="is_csp_policy"><?php esc_html_e( 'Content-Security-Policy', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<textarea id="is_csp_policy" name="is_hardening_settings[content_security_policy]" rows="4" class="large-text code" placeholder="<?php echo esc_attr( IS_Headers::suggested_csp() ); ?>"><?php echo esc_textarea( $settings['content_security_policy'] ); ?></textarea>
+						<p class="description">
+							<?php
+							printf(
+								/* translators: %s: a ready-to-use suggested policy string */
+								esc_html__( 'Empty = off. A reasonable starting point that rarely breaks a typical WordPress theme/plugin mix: %s — copy it in and adjust as needed.', 'integrity-sentinel' ),
+								'<code>' . esc_html( IS_Headers::suggested_csp() ) . '</code>'
+							);
+							?>
+						</p>
+						<label style="display:block;margin-top:6px;">
+							<input type="checkbox" name="is_hardening_settings[csp_report_only]" value="1" <?php checked( $settings['csp_report_only'], 1 ); ?>>
+							<?php esc_html_e( 'Report-only — log violations to the browser console without blocking anything. Recommended while testing; a wrong policy in enforcing mode can break scripts/styles sitewide.', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
 			</table>
 			<?php submit_button( __( 'Save HTTP hardening settings', 'integrity-sentinel' ) ); ?>
 		</form>
 		<?php
 	}
 
-	// -----------------------------------------------------------------
-	// Access control (IP allow/deny lists)
-	// -----------------------------------------------------------------
+	/**
+	 * Rewrites wp-content/wp-includes asset URLs to a disguised alias --
+	 * the riskiest thing this plugin writes to disk (a root .htaccess
+	 * rewrite rule). See IS_Asset_Cloak's class docblock before touching
+	 * this on a live site.
+	 */
+	private function render_asset_cloak_section() {
+		$settings = IS_Asset_Cloak::settings();
+		$active   = IS_Asset_Cloak::block_active();
+		?>
+		<h2><?php esc_html_e( 'Disguise wp-content/wp-includes paths', 'integrity-sentinel' ); ?></h2>
+		<div class="notice notice-warning inline">
+			<p>
+				<?php esc_html_e( 'The riskiest setting on this page: it rewrites your site\'s root .htaccess file. Getting it wrong can break every stylesheet, script, and uploaded image on the site. Unlike other settings here, IS_SAFE_MODE cannot undo this — it stops the URL rewriting in PHP, but not the .htaccess rule itself. Test on a staging copy first if at all possible, and use the "Remove" button below (not just disabling the checkbox) to fully revert.', 'integrity-sentinel' ); ?>
+			</p>
+		</div>
+		<p class="description">
+			<?php esc_html_e( 'Reduces (does not eliminate) the "this is WordPress" fingerprint an anonymous visitor sees when inspecting page source or a browser\'s Sources panel: enqueued styles/scripts, uploaded media, and theme/plugin asset URLs are rewritten from /wp-content/ and /wp-includes/ to your chosen alias. A theme or plugin that hardcodes a literal wp-content path instead of using WordPress\'s own URL functions won\'t be caught by this.', 'integrity-sentinel' ); ?>
+		</p>
 
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_asset_cloak_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="is_asset_cloak_alias"><?php esc_html_e( 'Alias', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<input type="text" id="is_asset_cloak_alias" name="is_asset_cloak_settings[alias]" value="<?php echo esc_attr( $settings['alias'] ); ?>" class="regular-text" placeholder="app">
+						<p class="description"><?php esc_html_e( 'e.g. "app" produces /app-content/ and /app-includes/ in place of /wp-content/ and /wp-includes/.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_asset_cloak_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Rewrite asset URLs to the alias above.', 'integrity-sentinel' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'Rewriting URLs alone does nothing until the .htaccess rule below is also applied — the disguised URLs would otherwise 404.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save alias settings', 'integrity-sentinel' ) ); ?>
+		</form>
+
+		<p>
+			<strong><?php esc_html_e( '.htaccess rule status:', 'integrity-sentinel' ); ?></strong>
+			<?php if ( $active ) : ?>
+				<span class="is-badge is-badge-low"><?php esc_html_e( 'Applied', 'integrity-sentinel' ); ?></span>
+			<?php else : ?>
+				<span class="is-badge is-badge-high"><?php esc_html_e( 'Not applied', 'integrity-sentinel' ); ?></span>
+			<?php endif; ?>
+		</p>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<?php wp_nonce_field( 'is_hardening_action' ); ?>
+			<?php if ( $active ) : ?>
+				<input type="hidden" name="action" value="is_remove_asset_cloak">
+				<?php submit_button( __( 'Remove the .htaccess rule', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+			<?php else : ?>
+				<input type="hidden" name="action" value="is_apply_asset_cloak">
+				<?php submit_button( __( 'Apply the .htaccess rule', 'integrity-sentinel' ), 'primary', 'submit', false, array( 'onclick' => "return confirm('" . esc_js( __( 'This rewrites your site\'s root .htaccess file. Continue only if you understand the risk described above.', 'integrity-sentinel' ) ) . "');" ) ); ?>
+			<?php endif; ?>
+		</form>
+		<p class="description">
+			<?php esc_html_e( 'Save an alias above first. Applying writes a marked rule block to the TOP of the root .htaccess (ahead of WordPress\'s own rules — required for it to work at all) and preserves everything else already in the file; removing deletes only that block. Apache/LiteSpeed only — nginx needs this added to your server config manually:', 'integrity-sentinel' ); ?>
+		</p>
+		<pre><?php echo esc_html( IS_Asset_Cloak::nginx_snippet( $settings['alias'] ) ); ?></pre>
+		<?php
+	}
+
+	/**
+	 * Known-vulnerability scanning against the WPScan Vulnerability
+	 * Database -- catches the class of risk file-integrity checking
+	 * can't: an untampered plugin with a known, published CVE in the
+	 * exact installed version.
+	 */
+	private function render_vulnerability_scanner_section() {
+		$settings = IS_Vulnerability_Scanner::settings();
+		?>
+		<h2><?php esc_html_e( 'Known-vulnerability scanning', 'integrity-sentinel' ); ?></h2>
+		<p>
+			<?php esc_html_e( 'File-integrity checking confirms nothing has been tampered with — it can\'t tell you a completely untampered plugin has a known, published vulnerability in the exact version installed. This checks installed plugins and the active theme against the WPScan Vulnerability Database on every scan and reports any that match, with severity, a CVE reference where available, and the version that fixes it.', 'integrity-sentinel' ); ?>
+		</p>
+		<p class="description">
+			<?php
+			printf(
+				wp_kses(
+					/* translators: %s: link to wpscan.com/register */
+					__( 'Requires a free WPScan API key (25 requests/day) — <a href="%s" target="_blank" rel="noopener noreferrer">register at wpscan.com</a>. Off by default since, unlike the WordPress.org lookups elsewhere in this plugin, it depends on a key only you can provide.', 'integrity-sentinel' ),
+					array(
+						'a' => array(
+							'href'   => array(),
+							'target' => array(),
+							'rel'    => array(),
+						),
+					)
+				),
+				'https://wpscan.com/register'
+			);
+			?>
+		</p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_vulnerability_scanner_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="is_vuln_api_key"><?php esc_html_e( 'WPScan API key', 'integrity-sentinel' ); ?></label></th>
+					<td><input type="text" id="is_vuln_api_key" name="is_vulnerability_scanner_settings[api_key]" value="<?php echo esc_attr( $settings['api_key'] ); ?>" class="regular-text" autocomplete="off"></td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_vulnerability_scanner_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Check installed plugins/theme for known vulnerabilities on every scan.', 'integrity-sentinel' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'A large plugin list is covered across a few scans rather than all at once, to stay within the free tier\'s daily quota.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save vulnerability scanning settings', 'integrity-sentinel' ) ); ?>
+		</form>
+		<?php
+	}
+
+	/**
+	 * Exact-hash signature matching against an admin-curated known-bad-
+	 * hash list -- see IS_Signatures's class doc for why this ships
+	 * empty rather than with a bundled hash database.
+	 */
+	private function render_signatures_section() {
+		$settings = IS_Signatures::settings();
+		?>
+		<h2><?php esc_html_e( 'Known-bad file hashes', 'integrity-sentinel' ); ?></h2>
+		<p>
+			<?php esc_html_e( 'Checks every scanned file\'s SHA-256 hash against a list you maintain — paste in hashes gathered from an incident write-up, a threat-intel feed, or a VirusTotal/MalwareBazaar report. An exact match is a certain finding, not a guess, so this complements (not replaces) the pattern-based heuristic scan above.', 'integrity-sentinel' ); ?>
+		</p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_signatures_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_signatures_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Check file hashes against the list below on every scan.', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="is_signature_hashes"><?php esc_html_e( 'Known-bad SHA-256 hashes', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<textarea id="is_signature_hashes" name="is_signatures_settings[hashes]" rows="6" class="large-text code" placeholder="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  # optional label"><?php echo esc_textarea( $settings['hashes'] ); ?></textarea>
+						<p class="description"><?php esc_html_e( 'One SHA-256 hash per line, with an optional "# label" after it. Malformed lines are ignored.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save signature settings', 'integrity-sentinel' ) ); ?>
+		</form>
+		<?php
+	}
+
+	/**
+	 * Opt-in reputation lookups (IP/hash) plus the software inventory
+	 * (SBOM) download -- see IS_Threat_Intel and IS_SBOM's class docs.
+	 * Lookups themselves happen from "Check reputation" links on the
+	 * Audit Log and Findings pages, not from here.
+	 */
+	private function render_threat_intel_section() {
+		$settings = IS_Threat_Intel::settings();
+		?>
+		<h2><?php esc_html_e( 'Threat intelligence & software inventory', 'integrity-sentinel' ); ?></h2>
+		<p>
+			<?php esc_html_e( 'Configure API keys here, then look up an IP\'s reputation from the Audit Log page or a finding\'s file hash from the Findings page — lookups are on-demand, not automatic, to keep this predictable and within free-tier quotas.', 'integrity-sentinel' ); ?>
+		</p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_threat_intel_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_threat_intel_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Allow on-demand reputation lookups.', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="is_ti_abuseipdb_key"><?php esc_html_e( 'AbuseIPDB API key', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<input type="text" id="is_ti_abuseipdb_key" name="is_threat_intel_settings[abuseipdb_key]" value="<?php echo esc_attr( $settings['abuseipdb_key'] ); ?>" class="regular-text" autocomplete="off">
+						<p class="description">
+							<?php
+							printf(
+								wp_kses(
+									/* translators: %s: link to abuseipdb.com/register */
+									__( 'Free tier available — <a href="%s" target="_blank" rel="noopener noreferrer">register at abuseipdb.com</a>.', 'integrity-sentinel' ),
+									array(
+										'a' => array(
+											'href'   => array(),
+											'target' => array(),
+											'rel'    => array(),
+										),
+									)
+								),
+								'https://www.abuseipdb.com/register'
+							);
+							?>
+						</p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="is_ti_virustotal_key"><?php esc_html_e( 'VirusTotal API key', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<input type="text" id="is_ti_virustotal_key" name="is_threat_intel_settings[virustotal_key]" value="<?php echo esc_attr( $settings['virustotal_key'] ); ?>" class="regular-text" autocomplete="off">
+						<p class="description">
+							<?php
+							printf(
+								wp_kses(
+									/* translators: %s: link to virustotal.com/gui/join-us */
+									__( 'Free tier available — <a href="%s" target="_blank" rel="noopener noreferrer">register at virustotal.com</a>.', 'integrity-sentinel' ),
+									array(
+										'a' => array(
+											'href'   => array(),
+											'target' => array(),
+											'rel'    => array(),
+										),
+									)
+								),
+								'https://www.virustotal.com/gui/join-us'
+							);
+							?>
+						</p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save threat intelligence settings', 'integrity-sentinel' ) ); ?>
+		</form>
+
+		<h3><?php esc_html_e( 'Software inventory (SBOM)', 'integrity-sentinel' ); ?></h3>
+		<p class="description"><?php esc_html_e( 'A CycloneDX-style export of every installed component (core, plugins, active theme) with its current version — regenerated and diffed automatically on every scan; an unexpected change shows up in the Audit Log as "Software inventory changed".', 'integrity-sentinel' ); ?></p>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<?php wp_nonce_field( 'is_threat_intel_action' ); ?>
+			<input type="hidden" name="action" value="is_download_sbom">
+			<?php submit_button( __( 'Download SBOM (JSON)', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+		</form>
+		<?php
+	}
+
+	/**
+	 * Access control (IP allow/deny lists).
+	 *
+	 * Renders the Access Control page: IP whitelist/blacklist, trusted proxy settings, and bot blocking.
+	 */
 	public function render_access_control() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -1601,23 +2628,110 @@ class IS_Admin {
 				</table>
 				<?php submit_button( __( 'Save bot blocking settings', 'integrity-sentinel' ) ); ?>
 			</form>
+
+			<?php $this->render_deception_section(); ?>
 		</div>
 		<?php
 		$this->render_shell_close();
 	}
 
-	// -----------------------------------------------------------------
-	// Login security (rename + rate limiting)
-	// -----------------------------------------------------------------
+	/**
+	 * Active-defense traps: fake sensitive paths and a decoy canary
+	 * token, both wired to an immediate temporary IP ban + critical
+	 * detection on IS_Deception. See its class doc for the reasoning.
+	 */
+	private function render_deception_section() {
+		$settings = IS_Deception::settings();
+		?>
+		<h2><?php esc_html_e( 'Deception (honeypots & canary token)', 'integrity-sentinel' ); ?></h2>
+		<p class="description">
+			<?php esc_html_e( 'A small set of fake sensitive paths (a decoy .env, a decoy backup archive, ...) that no real visitor ever requests — touching one temporarily bans the IP and raises a critical alert. Plus one decoy "canary" URL you can plant somewhere an attacker exfiltrating secrets might find it (a comment, a fake "internal notes" doc, a decoy config file); visiting it triggers the same response.', 'integrity-sentinel' ); ?>
+		</p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_deception_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_deception_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Trap honeypot path and canary token access.', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="is_deception_ban_minutes"><?php esc_html_e( 'Temporary ban duration (minutes)', 'integrity-sentinel' ); ?></label></th>
+					<td><input type="number" min="1" max="10080" id="is_deception_ban_minutes" name="is_deception_settings[ban_minutes]" value="<?php echo esc_attr( $settings['ban_minutes'] ); ?>" class="small-text"></td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save deception settings', 'integrity-sentinel' ) ); ?>
+		</form>
 
+		<p>
+			<strong><?php esc_html_e( 'Canary bait URL:', 'integrity-sentinel' ); ?></strong>
+			<code><?php echo esc_html( IS_Deception::canary_url() ); ?></code>
+		</p>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" onsubmit="return confirm('<?php echo esc_js( __( 'Regenerate the canary token? The URL above will change, so update it anywhere you\'ve already planted it.', 'integrity-sentinel' ) ); ?>');">
+			<?php wp_nonce_field( 'is_deception_action' ); ?>
+			<input type="hidden" name="action" value="is_regenerate_canary_token">
+			<?php submit_button( __( 'Regenerate canary token', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+		</form>
+
+		<h3><?php esc_html_e( 'Recent honeypot triggers', 'integrity-sentinel' ); ?></h3>
+		<?php $this->render_deception_entries( 'detect_honeypot_triggered' ); ?>
+
+		<h3><?php esc_html_e( 'Recent canary token uses', 'integrity-sentinel' ); ?></h3>
+		<?php $this->render_deception_entries( 'detect_canary_token_used' ); ?>
+		<?php
+	}
+
+	/**
+	 * Renders a table of recent audit log entries for the given deception action.
+	 *
+	 * @param string $action Audit log action name to filter entries by.
+	 */
+	private function render_deception_entries( $action ) {
+		$entries = IS_Audit_Log::entries_for_action( $action, 10 );
+		if ( empty( $entries ) ) {
+			echo '<p class="description">' . esc_html__( 'None yet.', 'integrity-sentinel' ) . '</p>';
+			return;
+		}
+		?>
+		<table class="widefat striped">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'When', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'IP', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'Detail', 'integrity-sentinel' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $entries as $entry ) : ?>
+					<tr>
+						<td><?php echo esc_html( $entry['created_at'] ); ?></td>
+						<td><?php echo esc_html( $entry['ip'] ); ?></td>
+						<td><code><?php echo esc_html( (string) $entry['detail'] ); ?></code></td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
+		<?php
+	}
+
+	/**
+	 * Login security (rename + rate limiting).
+	 *
+	 * Renders the Login Security page: login rename, throttle, 2FA, and password policy settings.
+	 */
 	public function render_login_security() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
 		settings_errors( 'is_login_rename_settings' );
-		$rename     = IS_Login::rename_settings();
-		$throttle   = IS_Login::throttle_settings();
-		$two_factor = IS_2FA::settings();
+		$rename          = IS_Login::rename_settings();
+		$throttle        = IS_Login::throttle_settings();
+		$two_factor      = IS_2FA::settings();
+		$password_policy = IS_Password_Policy::settings();
 		$this->render_shell_open( 'login' );
 		?>
 		<div class="wrap is-wrap">
@@ -1637,7 +2751,32 @@ class IS_Admin {
 						<td>
 							<code><?php echo esc_html( home_url( '/' ) ); ?></code>
 							<input type="text" id="is_login_slug" name="is_login_rename_settings[login_slug]" value="<?php echo esc_attr( $rename['login_slug'] ); ?>" class="regular-text" placeholder="<?php esc_attr_e( 'leave blank to keep wp-login.php', 'integrity-sentinel' ); ?>">
-							<p class="description"><?php esc_html_e( 'When set, wp-login.php 404s for everyone and this becomes the real login URL. Leave blank to keep the default wp-login.php behavior unchanged.', 'integrity-sentinel' ); ?></p>
+							<p class="description"><?php esc_html_e( 'When set, both wp-login.php and wp-admin 404 for anyone not already logged in, and this becomes the real login URL.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_login_host"><?php esc_html_e( 'Admin subdomain (optional)', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<input type="text" id="is_login_host" name="is_login_rename_settings[login_host]" value="<?php echo esc_attr( $rename['login_host'] ); ?>" class="regular-text" placeholder="admin.example.com">
+							<p class="description">
+								<?php esc_html_e( 'Optional and independent of the slug above — works alone, together with a slug, or not at all. Once DNS/your web server routes this hostname to this same site, visiting its bare address opens the login form directly, and wp-login.php works normally there too (any action) — no slug in the URL needed.', 'integrity-sentinel' ); ?>
+							</p>
+							<?php if ( '' !== $rename['login_host'] && '' === $rename['login_slug'] ) : ?>
+								<p class="description"><?php esc_html_e( 'No slug is set, so a password-reset email link (which always points at this site\'s main address, not the subdomain) still works normally — that one specific action stays reachable everywhere. Nothing else does.', 'integrity-sentinel' ); ?></p>
+							<?php endif; ?>
+							<?php if ( '' !== $rename['login_host'] ) : ?>
+								<div class="notice notice-warning inline" style="margin:10px 0 0;">
+									<p>
+										<?php
+										printf(
+											/* translators: %s: define('COOKIE_DOMAIN', ...) snippet */
+											esc_html__( 'Important: for a session started on the subdomain to also work on your main domain\'s wp-admin, add %s to wp-config.php (the leading dot covers all subdomains). Without it, logging in on the subdomain may leave you looking logged out on the main site.', 'integrity-sentinel' ),
+											'<code>' . esc_html( "define('COOKIE_DOMAIN', '." . preg_replace( '/^[^.]+\./', '', $rename['login_host'] ) . "');" ) . '</code>'
+										);
+										?>
+									</p>
+								</div>
+							<?php endif; ?>
 						</td>
 					</tr>
 				</table>
@@ -1670,16 +2809,63 @@ class IS_Admin {
 						<th scope="row"><label for="is_lockout_minutes"><?php esc_html_e( 'Lockout duration (minutes)', 'integrity-sentinel' ); ?></label></th>
 						<td><input type="number" min="1" max="1440" id="is_lockout_minutes" name="is_login_throttle_settings[lockout_minutes]" value="<?php echo esc_attr( $throttle['lockout_minutes'] ); ?>" class="small-text"></td>
 					</tr>
+					<tr>
+						<th scope="row"><label for="is_credential_stuffing_threshold"><?php esc_html_e( 'Credential stuffing threshold (distinct usernames)', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<input type="number" min="2" max="100" id="is_credential_stuffing_threshold" name="is_login_throttle_settings[credential_stuffing_threshold]" value="<?php echo esc_attr( $throttle['credential_stuffing_threshold'] ); ?>" class="small-text">
+							<p class="description"><?php esc_html_e( 'If one IP tries this many different usernames within the window above, it\'s treated as credential stuffing (not just a brute force against one account) and locked out immediately.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
 				</table>
 				<?php submit_button( __( 'Save rate limiting settings', 'integrity-sentinel' ) ); ?>
+			</form>
+
+			<h2><?php esc_html_e( 'Password strength policy', 'integrity-sentinel' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'WordPress\'s own strength meter is advisory only — it shows a color and a label but still accepts a weak password. This actually blocks one, on both the "forgot password" reset flow and profile/user-edit password changes (including new users created from wp-admin).', 'integrity-sentinel' ); ?></p>
+			<form method="post" action="options.php">
+				<?php settings_fields( 'is_password_policy_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_password_policy_settings[enabled]" value="1" <?php checked( $password_policy['enabled'], 1 ); ?>>
+								<?php esc_html_e( 'Reject a new password that doesn\'t meet the rules below.', 'integrity-sentinel' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_pw_min_length"><?php esc_html_e( 'Minimum length', 'integrity-sentinel' ); ?></label></th>
+						<td><input type="number" min="4" max="64" id="is_pw_min_length" name="is_password_policy_settings[min_length]" value="<?php echo esc_attr( $password_policy['min_length'] ); ?>" class="small-text"></td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Character requirements', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label style="display:block;">
+								<input type="checkbox" name="is_password_policy_settings[require_mixed_case]" value="1" <?php checked( $password_policy['require_mixed_case'], 1 ); ?>>
+								<?php esc_html_e( 'Require both uppercase and lowercase letters.', 'integrity-sentinel' ); ?>
+							</label>
+							<label style="display:block;">
+								<input type="checkbox" name="is_password_policy_settings[require_number]" value="1" <?php checked( $password_policy['require_number'], 1 ); ?>>
+								<?php esc_html_e( 'Require at least one number.', 'integrity-sentinel' ); ?>
+							</label>
+							<label style="display:block;">
+								<input type="checkbox" name="is_password_policy_settings[require_symbol]" value="1" <?php checked( $password_policy['require_symbol'], 1 ); ?>>
+								<?php esc_html_e( 'Require at least one symbol (e.g. !@#$%).', 'integrity-sentinel' ); ?>
+							</label>
+							<p class="description"><?php esc_html_e( 'A short list of extremely common passwords (password1, welcome1, ...) is always rejected once enabled, regardless of these rules.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save password policy', 'integrity-sentinel' ) ); ?>
 			</form>
 
 			<h2><?php esc_html_e( 'Two-factor authentication', 'integrity-sentinel' ); ?></h2>
 			<p class="description">
 				<?php
 				printf(
-					/* translators: %s: URL to the user's own profile page */
 					wp_kses(
+						/* translators: %s: URL to the user's own profile page */
 						__( 'Every user sets up their own two-factor authentication from <a href="%s">their profile page</a> — it cannot be set up on someone else\'s behalf. The setting below only controls whether it\'s required.', 'integrity-sentinel' ),
 						array( 'a' => array( 'href' => array() ) )
 					),
@@ -1705,15 +2891,347 @@ class IS_Admin {
 				</table>
 				<?php submit_button( __( 'Save two-factor authentication settings', 'integrity-sentinel' ) ); ?>
 			</form>
+
+			<h2><?php esc_html_e( 'Your active sessions', 'integrity-sentinel' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'Every device currently signed in as you. If you don\'t recognize one, revoke it and change your password.', 'integrity-sentinel' ); ?></p>
+			<?php $this->render_sessions_table( get_current_user_id() ); ?>
+			<?php if ( count( IS_Sessions::sessions_for( get_current_user_id() ) ) > 1 ) : ?>
+				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:10px;">
+					<input type="hidden" name="action" value="is_revoke_other_sessions">
+					<?php wp_nonce_field( 'is_revoke_other_sessions' ); ?>
+					<button type="submit" class="button"><?php esc_html_e( 'Log out everywhere else', 'integrity-sentinel' ); ?></button>
+				</form>
+			<?php endif; ?>
+
+			<?php $session_settings = IS_Sessions::settings(); ?>
+			<form method="post" action="options.php" style="margin-top:20px;">
+				<?php settings_fields( 'is_session_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'New-IP alerts', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_session_settings[alert_on_new_ip]" value="1" <?php checked( $session_settings['alert_on_new_ip'], 1 ); ?>>
+								<?php esc_html_e( 'Email/webhook alert the first time an account logs in from an IP it hasn\'t used before.', 'integrity-sentinel' ); ?>
+							</label>
+							<p class="description"><?php esc_html_e( 'A signal, not a block — travel and new devices are normal and still get in; you just get notified.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Impossible-travel detection', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_session_settings[impossible_travel_detection]" value="1" <?php checked( $session_settings['impossible_travel_detection'], 1 ); ?>>
+								<?php esc_html_e( 'Raise a higher-severity alert when an account logs in from a very different network shortly after its previous login.', 'integrity-sentinel' ); ?>
+							</label>
+							<p class="description"><?php esc_html_e( 'A lightweight heuristic (network distance, not true geolocation) — no bundled GeoIP database, no external lookups. IPv4 logins only.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_impossible_travel_window"><?php esc_html_e( 'Impossible-travel window (minutes)', 'integrity-sentinel' ); ?></label></th>
+						<td><input type="number" min="5" max="1440" id="is_impossible_travel_window" name="is_session_settings[impossible_travel_window_minutes]" value="<?php echo esc_attr( $session_settings['impossible_travel_window_minutes'] ); ?>" class="small-text"></td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Save session settings', 'integrity-sentinel' ) ); ?>
+			</form>
+
+			<?php $this->render_api_key_hygiene_section(); ?>
 		</div>
 		<?php
 		$this->render_shell_close();
 	}
 
-	// -----------------------------------------------------------------
-	// REST API
-	// -----------------------------------------------------------------
+	/** Read-only overview of every account's Application Passwords (WordPress core's own credential type) with a staleness flag -- no new credential storage here, just visibility into what core already tracks. */
+	private function render_api_key_hygiene_section() {
+		$settings = IS_Api_Key_Hygiene::settings();
+		$keys     = IS_Api_Key_Hygiene::list_all();
+		?>
+		<h2><?php esc_html_e( 'API key hygiene (Application Passwords)', 'integrity-sentinel' ); ?></h2>
+		<p class="description"><?php esc_html_e( 'Every Application Password across every account, with when it was created, last used, and from where. A credential nobody has used in a while is worth revoking under Users → Profile.', 'integrity-sentinel' ); ?></p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_api_key_hygiene_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="is_stale_after_days"><?php esc_html_e( 'Flag as stale after (days unused)', 'integrity-sentinel' ); ?></label></th>
+					<td><input type="number" min="1" max="3650" id="is_stale_after_days" name="is_api_key_hygiene_settings[stale_after_days]" value="<?php echo esc_attr( $settings['stale_after_days'] ); ?>" class="small-text"></td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save API key hygiene settings', 'integrity-sentinel' ) ); ?>
+		</form>
+		<?php if ( empty( $keys ) ) : ?>
+			<p class="description"><?php esc_html_e( 'No Application Passwords exist yet.', 'integrity-sentinel' ); ?></p>
+		<?php else : ?>
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'User', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Name', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Created', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Last used', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Last IP', 'integrity-sentinel' ); ?></th>
+						<th><?php esc_html_e( 'Status', 'integrity-sentinel' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( $keys as $key ) : ?>
+						<tr>
+							<td><?php echo esc_html( $key['user_login'] ); ?></td>
+							<td><?php echo esc_html( $key['name'] ); ?></td>
+							<td><?php echo $key['created'] ? esc_html( human_time_diff( $key['created'] ) . ' ' . __( 'ago', 'integrity-sentinel' ) ) : esc_html__( 'Unknown', 'integrity-sentinel' ); ?></td>
+							<td><?php echo $key['last_used'] ? esc_html( human_time_diff( $key['last_used'] ) . ' ' . __( 'ago', 'integrity-sentinel' ) ) : esc_html__( 'Never', 'integrity-sentinel' ); ?></td>
+							<td><?php echo esc_html( $key['last_ip'] ? $key['last_ip'] : '—' ); ?></td>
+							<td>
+								<?php if ( $key['is_stale'] ) : ?>
+									<span class="is-badge is-badge-medium"><?php esc_html_e( 'Stale', 'integrity-sentinel' ); ?></span>
+								<?php else : ?>
+									<span class="is-badge is-badge-low"><?php esc_html_e( 'Active', 'integrity-sentinel' ); ?></span>
+								<?php endif; ?>
+							</td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+		<?php endif; ?>
+		<?php
+	}
 
+	/**
+	 * Renders the active-sessions table for one user (used on the Login Security page for the current admin).
+	 *
+	 * @param int $user_id User ID whose active sessions should be listed.
+	 */
+	private function render_sessions_table( $user_id ) {
+		$sessions = IS_Sessions::sessions_for( $user_id );
+		if ( ! $sessions ) {
+			echo '<p class="description">' . esc_html__( 'No active sessions found.', 'integrity-sentinel' ) . '</p>';
+			return;
+		}
+		?>
+		<table class="widefat striped" style="max-width:800px;">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'Device', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'IP address', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'Signed in', 'integrity-sentinel' ); ?></th>
+					<th><?php esc_html_e( 'Expires', 'integrity-sentinel' ); ?></th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $sessions as $token => $session ) : ?>
+					<tr>
+						<td>
+							<?php echo esc_html( IS_Sessions::describe_user_agent( $session['ua'] ?? '' ) ); ?>
+							<?php if ( ! empty( $session['is_current'] ) ) : ?>
+								<span class="is-badge is-badge-info"><?php esc_html_e( 'This device', 'integrity-sentinel' ); ?></span>
+							<?php endif; ?>
+						</td>
+						<td><?php echo esc_html( $session['ip'] ?? '—' ); ?></td>
+						<td><?php echo esc_html( ! empty( $session['login'] ) ? human_time_diff( $session['login'] ) . ' ' . __( 'ago', 'integrity-sentinel' ) : '—' ); ?></td>
+						<td><?php echo esc_html( ! empty( $session['expiration'] ) ? human_time_diff( time(), $session['expiration'] ) : '—' ); ?></td>
+						<td>
+							<?php if ( empty( $session['is_current'] ) ) : ?>
+								<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+									<input type="hidden" name="action" value="is_revoke_session">
+									<input type="hidden" name="token" value="<?php echo esc_attr( $token ); ?>">
+									<?php wp_nonce_field( 'is_revoke_session' ); ?>
+									<button type="submit" class="button-link"><?php esc_html_e( 'Revoke', 'integrity-sentinel' ); ?></button>
+								</form>
+							<?php endif; ?>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
+		<?php
+	}
+
+	/**
+	 * Login Design.
+	 *
+	 * Renders the Login Design page: template picker, live preview, and customization form.
+	 */
+	public function render_login_design() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		settings_errors( 'is_login_design_settings' );
+		$design    = IS_Login_Design::settings();
+		$templates = IS_Login_Design::templates();
+		$this->render_shell_open( 'login-design' );
+		?>
+		<div class="wrap is-wrap">
+			<h1><?php esc_html_e( 'Login Design', 'integrity-sentinel' ); ?></h1>
+			<p class="description"><?php esc_html_e( 'Replace the stock sign-in screen with one of the built-in templates, tweak it below, or drop in your own CSS/HTML. Nothing here mentions your CMS by name — the goal is a sign-in page that looks like part of your product, not a default install.', 'integrity-sentinel' ); ?></p>
+
+			<div class="is-login-design-layout">
+				<form method="post" action="options.php" class="is-login-design-form" id="is-login-design-form">
+					<?php settings_fields( 'is_login_design_settings_group' ); ?>
+
+					<h2><?php esc_html_e( 'Template', 'integrity-sentinel' ); ?></h2>
+					<div class="is-template-grid" id="is-template-grid">
+						<?php foreach ( $templates as $key => $label ) : ?>
+							<label class="is-template-card is-tpl-<?php echo esc_attr( $key ); ?><?php echo $design['template'] === $key ? ' is-selected' : ''; ?>">
+								<input type="radio" name="is_login_design_settings[template]" value="<?php echo esc_attr( $key ); ?>" data-template="<?php echo esc_attr( $key ); ?>" <?php checked( $design['template'], $key ); ?>>
+								<span class="is-template-swatch" aria-hidden="true">
+									<span class="is-template-swatch-hero"></span>
+									<span class="is-template-swatch-card"></span>
+								</span>
+								<span class="is-template-label"><?php echo esc_html( $label ); ?></span>
+							</label>
+						<?php endforeach; ?>
+					</div>
+					<p class="description"><?php esc_html_e( '"Minimal" is a plain centered card. Every other template adds a decorative image panel down one side — heading, subheading, artwork, and which side it goes on are all yours to set below.', 'integrity-sentinel' ); ?></p>
+
+					<h2><?php esc_html_e( 'Hero panel', 'integrity-sentinel' ); ?></h2>
+					<table class="form-table" role="presentation" id="is-hero-fields">
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Placement', 'integrity-sentinel' ); ?></th>
+							<td>
+								<label style="margin-right:16px;"><input type="radio" name="is_login_design_settings[hero_position]" value="left" id="is-hero-position-left" <?php checked( $design['hero_position'], 'left' ); ?>> <?php esc_html_e( 'Left', 'integrity-sentinel' ); ?></label>
+								<label style="margin-right:16px;"><input type="radio" name="is_login_design_settings[hero_position]" value="right" id="is-hero-position-right" <?php checked( $design['hero_position'], 'right' ); ?>> <?php esc_html_e( 'Right', 'integrity-sentinel' ); ?></label>
+								<label><input type="radio" name="is_login_design_settings[hero_position]" value="center" id="is-hero-position-center" <?php checked( $design['hero_position'], 'center' ); ?>> <?php esc_html_e( 'Center', 'integrity-sentinel' ); ?></label>
+								<p class="description"><?php esc_html_e( 'Left / Right split the screen — artwork one side, form the other. Center floats the form as a frosted-glass card over a full-screen backdrop (the gradient, your photo, or the live carousel).', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-hero-heading"><?php esc_html_e( 'Heading', 'integrity-sentinel' ); ?></label></th>
+							<td><input type="text" id="is-hero-heading" name="is_login_design_settings[hero_heading]" value="<?php echo esc_attr( $design['hero_heading'] ); ?>" class="regular-text" placeholder="Welcome back"></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-hero-subheading"><?php esc_html_e( 'Subheading', 'integrity-sentinel' ); ?></label></th>
+							<td><input type="text" id="is-hero-subheading" name="is_login_design_settings[hero_subheading]" value="<?php echo esc_attr( $design['hero_subheading'] ); ?>" class="regular-text" placeholder="<?php esc_attr_e( 'e.g. Everything you need, in one place.', 'integrity-sentinel' ); ?>"></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-hero-image-url"><?php esc_html_e( 'Illustration / photo', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<div class="is-logo-picker">
+									<img id="is-hero-image-preview" src="<?php echo esc_url( $design['hero_image_url'] ); ?>" alt="" style="<?php echo '' === $design['hero_image_url'] ? 'display:none;' : ''; ?>">
+									<input type="url" id="is-hero-image-url" name="is_login_design_settings[hero_image_url]" value="<?php echo esc_attr( $design['hero_image_url'] ); ?>" class="regular-text" placeholder="https://example.com/illustration.jpg">
+									<button type="button" class="button" id="is-hero-image-pick"><?php esc_html_e( 'Choose from Media Library', 'integrity-sentinel' ); ?></button>
+									<button type="button" class="button-link" id="is-hero-image-clear" style="<?php echo '' === $design['hero_image_url'] ? 'display:none;' : ''; ?>"><?php esc_html_e( 'Remove', 'integrity-sentinel' ); ?></button>
+								</div>
+								<p class="description"><?php esc_html_e( 'Optional. Without one, a soft generated pattern is used instead — pick your own photo or illustration for something more "you".', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr id="is-carousel-gallery-row" style="<?php echo 'carousel' === $design['template'] ? '' : 'display:none;'; ?>">
+							<th scope="row"><label for="is-hero-gallery"><?php esc_html_e( 'Carousel images', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<div class="is-gallery-picker" id="is-gallery-picker">
+									<div class="is-gallery-thumbs" id="is-gallery-thumbs" aria-live="polite"></div>
+									<button type="button" class="button" id="is-gallery-add"><?php esc_html_e( 'Add images from Media Library', 'integrity-sentinel' ); ?></button>
+								</div>
+								<details class="is-gallery-advanced">
+									<summary><?php esc_html_e( 'Edit image URLs manually', 'integrity-sentinel' ); ?></summary>
+									<textarea id="is-hero-gallery" name="is_login_design_settings[hero_gallery]" rows="4" class="large-text code" placeholder="https://example.com/photo-1.jpg&#10;https://example.com/photo-2.jpg&#10;https://example.com/photo-3.jpg"><?php echo esc_textarea( implode( "\n", $design['hero_gallery'] ) ); ?></textarea>
+								</details>
+								<p class="description"><?php esc_html_e( 'Only used by the "Carousel" template — pick up to 8 images from your library (or paste URLs manually above). Two or more images enables navigation; one behaves like a static image; none falls back to a generated pattern.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr id="is-carousel-indicator-row" style="<?php echo 'carousel' === $design['template'] ? '' : 'display:none;'; ?>">
+							<th scope="row"><label for="is-carousel-indicator"><?php esc_html_e( 'Slide indicators', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<select id="is-carousel-indicator" name="is_login_design_settings[carousel_indicator]">
+									<?php foreach ( IS_Login_Design::carousel_indicators() as $ind_key => $ind_label ) : ?>
+										<option value="<?php echo esc_attr( $ind_key ); ?>" <?php selected( IS_Login_Design::carousel_indicator( $design ), $ind_key ); ?>><?php echo esc_html( $ind_label ); ?></option>
+									<?php endforeach; ?>
+								</select>
+								<p class="description"><?php esc_html_e( 'How the slide navigation looks: slim bars, round dots, a numeric counter, image thumbnails, or arrows only.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+					</table>
+
+					<h2><?php esc_html_e( 'Customize', 'integrity-sentinel' ); ?></h2>
+					<table class="form-table" role="presentation">
+						<tr>
+							<th scope="row"><?php esc_html_e( 'WordPress branding', 'integrity-sentinel' ); ?></th>
+							<td>
+								<label>
+									<input type="checkbox" id="is-hide-branding" name="is_login_design_settings[hide_branding]" value="1" <?php checked( ! empty( $design['hide_branding'] ) ); ?>>
+									<?php esc_html_e( 'Hide it — use my site name/homepage instead of the default WordPress logo, link, and page title.', 'integrity-sentinel' ); ?>
+								</label>
+								<p class="description"><?php esc_html_e( 'On by default. Turn off to restore the stock WordPress logo and title.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-login-color"><?php esc_html_e( 'Accent color', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<input type="color" id="is-login-color" name="is_login_design_settings[primary_color]" value="<?php echo esc_attr( $design['primary_color'] ); ?>">
+								<p class="description"><?php esc_html_e( 'Tints the hero artwork and drives the submit button, focus rings, and links across every template.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-login-radius"><?php esc_html_e( 'Corner roundness', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<input type="range" id="is-login-radius" name="is_login_design_settings[border_radius]" min="0" max="40" step="1" value="<?php echo esc_attr( $design['border_radius'] ); ?>">
+								<output id="is-login-radius-value" for="is-login-radius"><?php echo esc_html( $design['border_radius'] ); ?>px</output>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-login-logo-url"><?php esc_html_e( 'Logo', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<div class="is-logo-picker">
+									<img id="is-login-logo-preview" src="<?php echo esc_url( $design['logo_url'] ); ?>" alt="" style="<?php echo '' === $design['logo_url'] ? 'display:none;' : ''; ?>">
+									<input type="url" id="is-login-logo-url" name="is_login_design_settings[logo_url]" value="<?php echo esc_attr( $design['logo_url'] ); ?>" class="regular-text" placeholder="https://example.com/logo.png">
+									<button type="button" class="button" id="is-login-logo-pick"><?php esc_html_e( 'Choose from Media Library', 'integrity-sentinel' ); ?></button>
+									<button type="button" class="button-link" id="is-login-logo-clear" style="<?php echo '' === $design['logo_url'] ? 'display:none;' : ''; ?>"><?php esc_html_e( 'Remove', 'integrity-sentinel' ); ?></button>
+								</div>
+								<p class="description"><?php esc_html_e( 'Shown as text (your site name) until you set one, while branding is hidden above.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-login-custom-html"><?php esc_html_e( 'Custom HTML banner', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<textarea id="is-login-custom-html" name="is_login_design_settings[custom_html]" rows="3" class="large-text code" placeholder="<?php esc_attr_e( 'e.g. <p>Staff portal — authorized access only.</p>', 'integrity-sentinel' ); ?>"><?php echo esc_textarea( $design['custom_html'] ); ?></textarea>
+								<p class="description"><?php esc_html_e( 'A small notice shown above the form. Filtered through the same rules as post content (wp_kses_post) — scripts and unsafe markup are stripped.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="is-login-custom-css"><?php esc_html_e( 'Custom CSS', 'integrity-sentinel' ); ?></label></th>
+							<td>
+								<textarea id="is-login-custom-css" name="is_login_design_settings[custom_css]" rows="8" class="large-text code" placeholder=".login form { }"><?php echo esc_textarea( $design['custom_css'] ); ?></textarea>
+								<p class="description"><?php esc_html_e( 'Applied last, after everything above, so it can override anything on the page — full freedom if the customizer fields aren\'t enough.', 'integrity-sentinel' ); ?></p>
+							</td>
+						</tr>
+					</table>
+					<p class="submit" style="display:flex;gap:10px;align-items:center;">
+						<?php submit_button( __( 'Save login design', 'integrity-sentinel' ), 'primary', 'submit', false ); ?>
+						<button type="button" class="button" id="is-login-preview-btn"><?php esc_html_e( 'Open real preview ↗', 'integrity-sentinel' ); ?></button>
+						<span id="is-login-preview-status" class="description"></span>
+					</p>
+				</form>
+
+				<div class="is-login-preview-pane">
+					<h2><?php esc_html_e( 'Instant preview', 'integrity-sentinel' ); ?></h2>
+					<p class="description"><?php esc_html_e( 'Updates as you type — a stand-in, not the real page. Use "Open real preview" above to see it rendered for real, unsaved.', 'integrity-sentinel' ); ?></p>
+					<div class="is-login-preview" id="is-login-preview" data-template="<?php echo esc_attr( $design['template'] ); ?>" data-position="<?php echo esc_attr( $design['hero_position'] ); ?>" style="--is-login-color:<?php echo esc_attr( $design['primary_color'] ); ?>;--is-login-radius:<?php echo esc_attr( (int) $design['border_radius'] ); ?>px;">
+						<div class="is-login-preview-hero" id="is-login-preview-hero">
+							<span class="is-login-preview-blob is-login-preview-blob-1"></span>
+							<span class="is-login-preview-blob is-login-preview-blob-2"></span>
+							<div class="is-login-preview-hero-copy">
+								<strong id="is-login-preview-heading"><?php echo esc_html( $design['hero_heading'] ); ?></strong>
+								<span id="is-login-preview-subheading"><?php echo esc_html( $design['hero_subheading'] ); ?></span>
+							</div>
+						</div>
+						<div class="is-login-preview-card">
+							<div class="is-login-preview-logo" id="is-login-preview-logo"><?php echo esc_html( get_bloginfo( 'name' ) ? get_bloginfo( 'name' ) : __( 'Your Site', 'integrity-sentinel' ) ); ?></div>
+							<div class="is-login-preview-field"></div>
+							<div class="is-login-preview-field"></div>
+							<div class="is-login-preview-button"><?php esc_html_e( 'Log In', 'integrity-sentinel' ); ?></div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+		<?php
+		$this->render_shell_close();
+	}
+
+	/**
+	 * REST API.
+	 *
+	 * Renders the REST API page: enumeration/rate-limit restrictions and the blog post publishing endpoint.
+	 */
 	public function render_rest_api() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -1757,6 +3275,40 @@ class IS_Admin {
 						</td>
 					</tr>
 				</table>
+
+				<h3><?php esc_html_e( 'Rate limiting & abuse detection', 'integrity-sentinel' ); ?></h3>
+				<p class="description"><?php esc_html_e( 'Applies to every REST API route, not just this plugin\'s own endpoints. Whitelisted IPs (Access Control) always bypass these.', 'integrity-sentinel' ); ?></p>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="is_rest_rate_limit"><?php esc_html_e( 'Rate limit (requests per 5 minutes, per IP)', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<input type="number" min="0" max="10000" id="is_rest_rate_limit" name="is_rest_api_settings[rate_limit]" value="<?php echo esc_attr( $api['rate_limit'] ); ?>" class="small-text">
+							<p class="description"><?php esc_html_e( '0 disables rate limiting entirely.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Enumeration detection', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_rest_api_settings[enumeration_detection]" value="1" <?php checked( $api['enumeration_detection'], 1 ); ?>>
+								<?php esc_html_e( 'Log a detection when one IP requests many sequential numeric-ID objects (e.g. /wp/v2/posts/1, /2, /3, …) — a common scanner pattern.', 'integrity-sentinel' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="is_rest_enumeration_threshold"><?php esc_html_e( 'Enumeration threshold (per 5 minutes, per IP)', 'integrity-sentinel' ); ?></label></th>
+						<td><input type="number" min="5" max="1000" id="is_rest_enumeration_threshold" name="is_rest_api_settings[enumeration_threshold]" value="<?php echo esc_attr( $api['enumeration_threshold'] ); ?>" class="small-text"></td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Block on enumeration', 'integrity-sentinel' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="is_rest_api_settings[block_on_enumeration]" value="1" <?php checked( $api['block_on_enumeration'], 1 ); ?>>
+								<?php esc_html_e( 'Also reject requests once the threshold is crossed, instead of only logging. Off by default — a very active legitimate integration could plausibly trip this.', 'integrity-sentinel' ); ?>
+							</label>
+						</td>
+					</tr>
+				</table>
 				<?php submit_button( __( 'Save REST restriction settings', 'integrity-sentinel' ) ); ?>
 			</form>
 
@@ -1791,23 +3343,34 @@ class IS_Admin {
 		$this->render_shell_close();
 	}
 
-	// -----------------------------------------------------------------
-	// Audit log
-	// -----------------------------------------------------------------
-
+	/**
+	 * Audit log.
+	 *
+	 * Renders the Audit Log page: a paginated list of recorded security-relevant events.
+	 */
 	public function render_audit_log() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$per_page = 50;
-		$paged    = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only pagination
-		$entries  = IS_Audit_Log::entries( $per_page, ( $paged - 1 ) * $per_page );
-		$total    = IS_Audit_Log::count();
-		$pages    = max( 1, (int) ceil( $total / $per_page ) );
+		$per_page    = 50;
+		$paged       = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only pagination
+		$entries     = IS_Audit_Log::entries( $per_page, ( $paged - 1 ) * $per_page );
+		$total       = IS_Audit_Log::count();
+		$pages       = max( 1, (int) ceil( $total / $per_page ) );
+		$error       = isset( $_GET['is_error'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_error'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
+		$ti_result   = isset( $_GET['is_ti_result'] ) ? sanitize_text_field( rawurldecode( wp_unslash( $_GET['is_ti_result'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- display-only message set by our own redirect, already sanitized via sanitize_text_field()
+		$ti_settings = IS_Threat_Intel::settings();
+		$ti_ready    = ! empty( $ti_settings['enabled'] ) && '' !== trim( (string) $ti_settings['abuseipdb_key'] );
 		$this->render_shell_open( 'audit' );
 		?>
 		<div class="wrap is-wrap">
 			<h1><?php esc_html_e( 'Audit Log', 'integrity-sentinel' ); ?></h1>
+			<?php if ( $error ) : ?>
+				<div class="notice notice-error"><p><?php echo esc_html( $error ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( $ti_result ) : ?>
+				<div class="notice notice-info"><p><?php echo esc_html( $ti_result ); ?></p></div>
+			<?php endif; ?>
 			<p class="description">
 				<?php esc_html_e( 'Append-only record of every security-relevant action: scans, finding status changes, settings changes, hardening actions, deactivations. Nothing done through WordPress can act on this plugin without leaving a row here.', 'integrity-sentinel' ); ?>
 			</p>
@@ -1830,7 +3393,17 @@ class IS_Admin {
 						<tr>
 							<td><?php echo esc_html( $entry['created_at'] ); ?></td>
 							<td><?php echo esc_html( $entry['user_login'] ); ?></td>
-							<td><?php echo esc_html( $entry['ip'] ); ?></td>
+							<td>
+								<?php echo esc_html( $entry['ip'] ); ?>
+								<?php if ( $ti_ready && $entry['ip'] ) : ?>
+									<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+										<?php wp_nonce_field( 'is_threat_intel_action' ); ?>
+										<input type="hidden" name="action" value="is_check_ip_reputation">
+										<input type="hidden" name="ip" value="<?php echo esc_attr( $entry['ip'] ); ?>">
+										<button type="submit" class="button-link"><?php esc_html_e( 'Check reputation', 'integrity-sentinel' ); ?></button>
+									</form>
+								<?php endif; ?>
+							</td>
 							<td><code><?php echo esc_html( $entry['action'] ); ?></code></td>
 							<td><code><?php echo esc_html( (string) $entry['detail'] ); ?></code></td>
 						</tr>
@@ -1860,9 +3433,225 @@ class IS_Admin {
 	}
 
 	// -----------------------------------------------------------------
-	// Settings
+	// Reports & Compliance
 	// -----------------------------------------------------------------
 
+	/**
+	 * The controls this plugin can itself confirm are enabled, pulled
+	 * straight from every module's own settings()/status getters --
+	 * nothing new to track, just a single-page summary of what's already
+	 * configured, for a site owner answering a security questionnaire.
+	 *
+	 * @return array<array{label:string,passed:bool}>
+	 */
+	private function compliance_checklist() {
+		$login_throttle = IS_Login::throttle_settings();
+		$rest_api       = IS_Rest_API::settings();
+		$ip_list        = IS_IP_List::settings();
+		$headers        = IS_Headers::settings();
+		$headers_score  = IS_Headers::audit_score( $headers );
+		$sessions       = IS_Sessions::settings();
+
+		$csp_enforced = false;
+		foreach ( $headers_score['items'] as $item ) {
+			if ( 'csp_enforced' === $item['key'] ) {
+				$csp_enforced = $item['passed'];
+				break;
+			}
+		}
+
+		return array(
+			array(
+				'label'  => __( 'Two-factor authentication enforced for at least one role', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_2FA::settings()['enforced_roles'] ),
+			),
+			array(
+				'label'  => __( 'Password strength policy enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_Password_Policy::settings()['enabled'] ),
+			),
+			array(
+				'label'  => __( 'Login brute-force / credential-stuffing protection enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( $login_throttle['enabled'] ),
+			),
+			array(
+				'label'  => __( 'REST API rate limiting enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( $rest_api['rate_limit'] ),
+			),
+			array(
+				'label'  => __( 'REST API enumeration detection enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( $rest_api['enumeration_detection'] ),
+			),
+			array(
+				'label'  => __( 'IP access control configured (allow or deny list in use)', 'integrity-sentinel' ),
+				'passed' => '' !== trim( $ip_list['whitelist'] . $ip_list['blacklist'] ),
+			),
+			array(
+				'label'  => __( 'Deception (honeypots / canary token) enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_Deception::settings()['enabled'] ),
+			),
+			array(
+				'label'  => __( 'Security response headers enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( $headers['security_headers'] ),
+			),
+			array(
+				'label'  => __( 'Content-Security-Policy enforced', 'integrity-sentinel' ),
+				'passed' => $csp_enforced,
+			),
+			array(
+				'label'  => __( 'WordPress version disclosure hidden', 'integrity-sentinel' ),
+				'passed' => ! empty( $headers['hide_wp_version'] ),
+			),
+			array(
+				'label'  => __( 'Known-vulnerability (CVE) scanning enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_Vulnerability_Scanner::settings()['enabled'] ),
+			),
+			array(
+				'label'  => __( 'Exact-hash signature scanning enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_Signatures::settings()['enabled'] ),
+			),
+			array(
+				'label'  => __( 'Threat-intelligence reputation lookups configured', 'integrity-sentinel' ),
+				'passed' => ! empty( IS_Threat_Intel::settings()['enabled'] ),
+			),
+			array(
+				'label'  => __( 'PHP execution blocked in the uploads directory', 'integrity-sentinel' ),
+				'passed' => IS_Hardening::uploads_block_active(),
+			),
+			array(
+				'label'  => __( 'Hotlink protection applied', 'integrity-sentinel' ),
+				'passed' => IS_Hotlink::active(),
+			),
+			array(
+				'label'  => __( 'WordPress asset paths cloaked', 'integrity-sentinel' ),
+				'passed' => IS_Asset_Cloak::block_active(),
+			),
+			array(
+				'label'  => __( 'Session impossible-travel anomaly detection enabled', 'integrity-sentinel' ),
+				'passed' => ! empty( $sessions['impossible_travel_detection'] ),
+			),
+			array(
+				'label'  => __( 'Append-only audit logging active', 'integrity-sentinel' ),
+				'passed' => true, // always-on core feature of this plugin.
+			),
+		);
+	}
+
+	/**
+	 * Renders the Reports & Compliance page: security headers score, email auth check, and compliance checklist.
+	 */
+	public function render_reports() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$headers_settings = IS_Headers::settings();
+		$headers_score    = IS_Headers::audit_score( $headers_settings );
+		$checklist        = $this->compliance_checklist();
+
+		$domain = isset( $_GET['is_email_domain'] ) ? sanitize_text_field( wp_unslash( $_GET['is_email_domain'] ) ) : IS_Email_Auth::site_domain(); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only lookup, not a state change
+		$email  = IS_Email_Auth::check_domain( $domain );
+
+		$this->render_shell_open( 'reports' );
+		?>
+		<div class="wrap is-wrap">
+			<h1><?php esc_html_e( 'Reports & Compliance', 'integrity-sentinel' ); ?></h1>
+			<p class="description"><?php esc_html_e( 'A single-page summary of this plugin\'s own configuration, for answering a security questionnaire or a quick self-check — nothing here is tracked separately from the settings already configured elsewhere in the plugin.', 'integrity-sentinel' ); ?></p>
+
+			<h2><?php esc_html_e( 'Security headers score', 'integrity-sentinel' ); ?></h2>
+			<p>
+				<strong><?php echo esc_html( sprintf( /* translators: 1: passed count, 2: total count */ __( '%1$d / %2$d', 'integrity-sentinel' ), $headers_score['score'], $headers_score['max'] ) ); ?></strong>
+				— <a href="<?php echo esc_url( admin_url( 'admin.php?page=integrity-sentinel-hardening' ) ); ?>"><?php esc_html_e( 'adjust under Hardening', 'integrity-sentinel' ); ?></a>
+			</p>
+			<ul>
+				<?php foreach ( $headers_score['items'] as $item ) : ?>
+					<li><?php echo $item['passed'] ? '✅' : '⬜'; ?> <?php echo esc_html( $item['label'] ); ?></li>
+				<?php endforeach; ?>
+			</ul>
+
+			<h2><?php esc_html_e( 'Email authentication (SPF / DMARC / DKIM)', 'integrity-sentinel' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'Local DNS lookups only — no third-party service, no key required. DKIM has no fixed DNS location, so this tries a handful of common selectors; a miss means "not found under a common selector", not "definitely absent".', 'integrity-sentinel' ); ?></p>
+			<form method="get" action="<?php echo esc_url( admin_url( 'admin.php' ) ); ?>">
+				<input type="hidden" name="page" value="integrity-sentinel-reports">
+				<label for="is_email_domain"><?php esc_html_e( 'Domain', 'integrity-sentinel' ); ?></label>
+				<input type="text" id="is_email_domain" name="is_email_domain" value="<?php echo esc_attr( $domain ); ?>" class="regular-text">
+				<?php submit_button( __( 'Check', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+			</form>
+			<ul>
+				<li><?php echo $email['spf'] ? '✅' : '⬜'; ?> <?php esc_html_e( 'SPF record found', 'integrity-sentinel' ); ?></li>
+				<li>
+					<?php echo $email['dmarc'] ? '✅' : '⬜'; ?> <?php esc_html_e( 'DMARC record found', 'integrity-sentinel' ); ?>
+					<?php if ( $email['dmarc'] && $email['dmarc_policy'] ) : ?>
+						(<?php echo esc_html( $email['dmarc_policy'] ); ?>)
+					<?php endif; ?>
+				</li>
+				<li>
+					<?php echo $email['dkim'] ? '✅' : '⬜'; ?> <?php esc_html_e( 'DKIM record found', 'integrity-sentinel' ); ?>
+					<?php if ( $email['dkim'] ) : ?>
+						(<?php echo esc_html( $email['dkim_selector'] ); ?>._domainkey)
+					<?php endif; ?>
+				</li>
+			</ul>
+
+			<h2><?php esc_html_e( 'Compliance checklist', 'integrity-sentinel' ); ?></h2>
+			<ul>
+				<?php foreach ( $checklist as $item ) : ?>
+					<li><?php echo $item['passed'] ? '✅' : '⬜'; ?> <?php echo esc_html( $item['label'] ); ?></li>
+				<?php endforeach; ?>
+			</ul>
+
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<?php wp_nonce_field( 'is_reports_action' ); ?>
+				<input type="hidden" name="action" value="is_export_compliance_report">
+				<?php submit_button( __( 'Export report (Markdown)', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+			</form>
+		</div>
+		<?php
+		$this->render_shell_close();
+	}
+
+	/**
+	 * Streams the compliance report (headers score, email auth, checklist) as a Markdown download.
+	 */
+	public function handle_export_compliance_report() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'integrity-sentinel' ) );
+		}
+		check_admin_referer( 'is_reports_action' );
+
+		$headers_score = IS_Headers::audit_score( IS_Headers::settings() );
+		$email         = IS_Email_Auth::check_domain( IS_Email_Auth::site_domain() );
+		$checklist     = $this->compliance_checklist();
+
+		$lines   = array();
+		$lines[] = '# ' . sprintf( /* translators: %s: site name */ __( 'Integrity Sentinel report — %s', 'integrity-sentinel' ), wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES ) );
+		$lines[] = '_' . gmdate( 'Y-m-d H:i' ) . ' UTC_';
+		$lines[] = '';
+		$lines[] = '## ' . __( 'Security headers score', 'integrity-sentinel' ) . ' — ' . $headers_score['score'] . '/' . $headers_score['max'];
+		foreach ( $headers_score['items'] as $item ) {
+			$lines[] = '- [' . ( $item['passed'] ? 'x' : ' ' ) . '] ' . $item['label'];
+		}
+		$lines[] = '';
+		$lines[] = '## ' . __( 'Email authentication', 'integrity-sentinel' ) . ' (' . $email['domain'] . ')';
+		$lines[] = '- [' . ( $email['spf'] ? 'x' : ' ' ) . '] SPF';
+		$lines[] = '- [' . ( $email['dmarc'] ? 'x' : ' ' ) . '] DMARC' . ( $email['dmarc'] && $email['dmarc_policy'] ? ' (' . $email['dmarc_policy'] . ')' : '' );
+		$lines[] = '- [' . ( $email['dkim'] ? 'x' : ' ' ) . '] DKIM' . ( $email['dkim'] ? ' (' . $email['dkim_selector'] . '._domainkey)' : '' );
+		$lines[] = '';
+		$lines[] = '## ' . __( 'Compliance checklist', 'integrity-sentinel' );
+		foreach ( $checklist as $item ) {
+			$lines[] = '- [' . ( $item['passed'] ? 'x' : ' ' ) . '] ' . $item['label'];
+		}
+
+		nocache_headers();
+		header( 'Content-Type: text/markdown; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename="integrity-sentinel-report-' . gmdate( 'Y-m-d' ) . '.md"' );
+		echo implode( "\n", $lines ) . "\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- plain-text Markdown file download, not HTML output
+		exit;
+	}
+
+	/**
+	 * Settings.
+	 *
+	 * Renders the Settings page: scan schedule, alerting, and general scan configuration.
+	 */
 	public function render_settings() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;

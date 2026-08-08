@@ -10,6 +10,8 @@
  *
  * Covers runtime files only (root PHP, includes/, assets/); dev files
  * (tests/, bin/, languages/) are deliberately excluded.
+ *
+ * @package Integrity_Sentinel
  */
 
 $root     = dirname( __DIR__ );

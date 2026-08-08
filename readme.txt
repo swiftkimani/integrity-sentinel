@@ -4,7 +4,7 @@ Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.17.0
+Stable tag: 1.24.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -189,6 +189,151 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.24.0 =
+* Improved: the Carousel login template is now a full-bleed, immersive
+  slideshow — the images fill the entire hero panel (with a slow Ken
+  Burns zoom and a legibility scrim) instead of the small framed box
+  they used to sit in, so photos actually read at a glance.
+* New: choosable carousel slide indicators — pick Bars (the original),
+  Dots, a numeric "1 / 4" counter, image Thumbnails, or None (arrows
+  only), from a dropdown on the Login Design screen.
+* New: a visual Media Library picker for the carousel gallery — add
+  images in a multi-select grid with thumbnail previews and per-image
+  remove buttons, instead of pasting URLs by hand. Manual URL entry is
+  still available under "Edit image URLs manually" for anyone who wants
+  it.
+* New: a third hero placement, "Center", alongside Left and Right — the
+  sign-in form floats as a frosted-glass card dead-center over a
+  full-screen backdrop: the template's gradient, your hero photo, or the
+  live carousel running full-bleed behind it. Works with every template
+  and stays responsive down to mobile.
+
+= 1.23.0 =
+* New: three more login templates, alongside the existing seven with no
+  changes to any of them (verified with a byte-for-byte regression
+  check before release):
+  - Carousel — a real interactive image slider with dot and arrow
+    navigation and auto-advance, for a heading/subheading plus up to 8
+    images (one URL per line). One image behaves like a normal static
+    photo; none falls back to the usual generated pattern. Small
+    vanilla-JS controller, no dependencies, respects
+    prefers-reduced-motion.
+  - Terminal — a dark, monospace, code-editor-styled hero panel with a
+    window-chrome title bar and a blinking cursor after the heading.
+  - Polaroid — the hero photo renders as a tilted, white-bordered print
+    instead of a full-bleed background.
+
+= 1.22.0 =
+* New: known-vulnerability scanning — checks installed plugins and the
+  active theme against the WPScan Vulnerability Database on every scan,
+  reporting matches with severity, CVE references, and the fixed
+  version. Catches what file-integrity checking structurally can't: a
+  completely untampered plugin with a known, published, unpatched CVE.
+  Opt-in (needs a free WPScan API key), off by default.
+* New: password strength policy — WordPress core's own strength meter
+  is advisory only and still accepts a weak password; this actually
+  rejects one, on both the "forgot password" reset flow and profile/
+  user-edit password changes. Configurable minimum length and
+  character-class requirements, plus a always-on common-password
+  blocklist once enabled. Off by default.
+* New: a real, configurable Content-Security-Policy header, alongside
+  the existing minimal clickjacking-only one (which still works exactly
+  as before if this isn't touched). Off by default, with a report-only
+  mode to test safely before enforcing, and a suggested starting policy
+  that closes off the classic object-embed and base-tag-hijack vectors
+  without breaking a typical theme/plugin's inline scripts/styles.
+
+= 1.21.0 =
+* Fixed: a real bug where an uploaded login logo never actually
+  rendered — the "hide WordPress branding" rule (on by default) and the
+  logo-override rule used selectors of different CSS specificity, so
+  the branding rule always won regardless of which came later in the
+  stylesheet. Both now match exactly, with a regression test.
+* Fixed: every settings page's field table (form-table) had a glass
+  background and rounded corners but no interior padding or border at
+  all, so fields sat flush against the rounded edges — the container
+  had nothing containing it. Every settings page now gets proper
+  padding, border, and shadow, matching the rest of the UI.
+* New: Session Security — every admin can see their own active login
+  sessions (device, IP, sign-in time) and revoke individual ones or
+  all-others-at-once; a manage_options user can force-logout any
+  account's sessions entirely from the Users list (incident response);
+  an optional alert fires the first time an account logs in from an IP
+  it hasn't used before. Built entirely on WordPress core's own session
+  API, no custom session storage.
+* New: WordPress fingerprint reduction — removes the wlwmanifest,
+  shortlink, and REST-API-discovery head links/header that advertise
+  WordPress-specific endpoints on every page. Safe for any site, on by
+  default; purely stops advertising these URLs, doesn't disable them.
+* New (opt-in, off by default): disguises /wp-content/ and
+  /wp-includes/ asset URLs behind a chosen alias, reducing what a
+  visitor sees in page source or a browser's Sources panel. The
+  riskiest thing this plugin writes to disk — a root .htaccess rewrite
+  rule — so it ships with heavy warnings, an Nginx snippet for non-
+  Apache servers, and a one-click removal. Verified the generated rule
+  syntax directly against Apache's own config parser before shipping.
+
+= 1.20.0 =
+* Fixed: the Media Library picker (logo and hero image) could silently
+  fail to respond to clicks if its script hadn't finished loading yet
+  when the page first rendered. It now checks at click time instead of
+  page-load time, so it always works regardless of load order.
+* Improved: the real-preview button now surfaces the actual failure
+  reason (in the browser console and on-screen) instead of a generic
+  message if something goes wrong, making any future issue diagnosable.
+* New: three more split-screen templates — Forest, Monochrome, and
+  Ocean — alongside Sunrise, Aurora Night, Bubblegum, and Minimal (7
+  total).
+* New: hero panel placement — left or right — so the artwork and the
+  sign-in form can trade sides.
+* New: an explicit "Hide WordPress branding" checkbox (on by default)
+  instead of the behavior being silent/automatic — turn it off to
+  restore the stock WordPress logo and page title.
+* Improved: a finer responsive breakpoint for small phones, tightening
+  card padding instead of just inheriting the tablet layout.
+
+= 1.19.0 =
+* New: Login Design templates reworked as "split-screen" layouts —
+  three built-in designs (Sunrise, Aurora Night, Bubblegum) with a
+  decorative hero panel (heading, subheading, and either a generated
+  pattern or your own uploaded photo/illustration) beside the sign-in
+  card, plus a plain Minimal option. Colors, logo, corner roundness,
+  custom CSS, and a custom HTML banner all still apply on top.
+* Changed: the login page no longer mentions WordPress anywhere —
+  the default logo mark, its link target, and the browser tab title
+  are always replaced with your site's own name/homepage, not just
+  when a custom logo is set.
+* New: a real, unsaved-changes preview. "Open real preview" saves your
+  in-progress edits to a short-lived per-admin draft and opens the
+  actual login page rendering them — no need to save first, and
+  nothing is written to the live settings until you click Save. A
+  smaller instant mockup on the settings page also updates as you type
+  for quick, no-network feedback.
+* Fixed: the old wp-login.php/wp-admin block returned WordPress's bare
+  `wp_die()` "Not Found" text. It's now a proper themed 404 page (matches
+  what a real 404 on the site would look like, no hint that it's a
+  security block) with a link back to the homepage and an automatic
+  redirect there after a few seconds.
+
+= 1.18.0 =
+* Fixed: hiding the login page previously only blocked wp-login.php —
+  the old default `/wp-admin/` route still worked for anyone not
+  logged in, quietly redirecting to the new login URL and confirming
+  it was hidden in the first place. It now 404s the same way
+  wp-login.php does (admin-ajax.php/admin-post.php and already
+  logged-in users are unaffected).
+* New: optional admin subdomain (e.g. `admin.example.com`) as a second
+  login entry point once DNS/your web server routes it to the same
+  site — the login form loads at that host's root, no slug in the
+  URL. Requires a custom login slug to already be set; the settings
+  page documents the `COOKIE_DOMAIN` change this needs in
+  wp-config.php.
+* New: Login Design — replaces the stock wp-login.php look with four
+  built-in templates (Refined Default, Midnight Glass, Minimal, Aurora
+  Gradient), a customizer (accent color, logo, corner roundness), a
+  custom-CSS box, and a sanitized custom-HTML banner above the form,
+  with a live preview on the settings page.
 
 = 1.17.0 =
 * New: "liquid glass" visual refresh for the app shell — frosted

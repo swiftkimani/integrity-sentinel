@@ -1,4 +1,11 @@
 <?php
+/**
+ * Orchestrates a single batched, resumable scan run: file walk, heuristic
+ * scan, and core/plugin checksum verification.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -23,13 +30,23 @@ class IS_Scanner {
 	 * 30-second max_execution_time even when batch_size is set high. */
 	const BATCH_TIME_BUDGET = 20;
 
-	/** @var IS_DB */
+	/**
+	 * Database access object.
+	 *
+	 * @var IS_DB
+	 */
 	private $db;
 
+	/**
+	 * Constructor.
+	 */
 	public function __construct() {
 		$this->db = IS_DB::instance();
 	}
 
+	/**
+	 * Stored scan settings, merged over their defaults.
+	 */
 	private function settings() {
 		return wp_parse_args(
 			get_option( 'is_scan_settings', array() ),
@@ -46,11 +63,21 @@ class IS_Scanner {
 		);
 	}
 
+	/**
+	 * Builds a file walker configured with the current exclusion settings.
+	 *
+	 * @param array $settings Settings shaped like settings().
+	 */
 	private function walker( array $settings ) {
 		$excludes = array_filter( array_map( 'trim', explode( "\n", $settings['excluded_paths'] ) ) );
 		return new IS_File_Walker( $excludes );
 	}
 
+	/**
+	 * Whether a relative path looks like a PHP-executable file.
+	 *
+	 * @param string $relative_path Path relative to ABSPATH.
+	 */
 	private function is_php_file( $relative_path ) {
 		return (bool) preg_match( '/\.(php|phtml|php[0-9]?)$/i', $relative_path );
 	}
@@ -60,6 +87,8 @@ class IS_Scanner {
 	 * run's cursor, and returns the run id. Building the file list is
 	 * cheap (just enumerating names, not reading contents) so it's safe
 	 * to do synchronously even on the first AJAX call.
+	 *
+	 * @param string $trigger_type What started the scan ('manual', 'cron', 'cli', ...).
 	 */
 	public function start_run( $trigger_type = 'manual' ) {
 		// Refuse to start a second concurrent scan.
@@ -92,6 +121,8 @@ class IS_Scanner {
 	 * run *before* the run is finished (auto-resolve + alert email), so
 	 * every kind of finding is on record by the time either happens --
 	 * whichever process drives the final batch (AJAX, cron, or CLI).
+	 *
+	 * @param int $run_id Scan run ID to process the next batch for.
 	 */
 	public function process_batch( $run_id ) {
 		$run = $this->db->get_run( $run_id );
@@ -119,6 +150,15 @@ class IS_Scanner {
 		}
 	}
 
+	/**
+	 * The actual batch-processing work, run while holding the scan lock:
+	 * walks up to batch_size files (or until BATCH_TIME_BUDGET elapses),
+	 * advancing the cursor after each one, and completes the run once
+	 * every file has been processed.
+	 *
+	 * @param int   $run_id Scan run ID being processed.
+	 * @param array $run    Current run row, as returned by IS_DB::get_run().
+	 */
 	private function process_batch_locked( $run_id, $run ) {
 		$files = $this->db->get_run_files( $run_id );
 		if ( null === $files ) {
@@ -174,14 +214,19 @@ class IS_Scanner {
 	 * checksum comparisons, then -- and only then -- auto-resolve stale
 	 * findings and send the alert email, so both reflect everything the
 	 * scan found rather than just the heuristic pass.
+	 *
+	 * @param int   $run_id Scan run ID being completed.
+	 * @param array $run    Current run row, as returned by IS_DB::get_run().
 	 */
 	private function complete_run( $run_id, $run ) {
 		$self_findings      = $this->check_self_integrity( $run_id );
 		$hardening_findings = ( new IS_Hardening() )->run_checks( $run_id, $this->db );
+		$vuln_findings      = ( new IS_Vulnerability_Scanner() )->run_checks( $run_id, $this->db );
 		$core_result        = $this->check_core_integrity( $run_id );
 		$plugin_result      = $this->check_plugin_integrity( $run_id );
+		IS_SBOM::refresh_snapshot();
 
-		$extra_findings = $self_findings + $hardening_findings;
+		$extra_findings = $self_findings + $hardening_findings + $vuln_findings;
 		if ( ! is_wp_error( $core_result ) ) {
 			$extra_findings += (int) $core_result;
 		}
@@ -229,6 +274,7 @@ class IS_Scanner {
 	 * (injecting into an existing plugin file without noticing the
 	 * manifest), it is not cryptographic attestation.
 	 *
+	 * @param int $run_id Scan run ID findings are recorded against.
 	 * @return int Number of NEW findings.
 	 */
 	public function check_self_integrity( $run_id ) {
@@ -312,6 +358,10 @@ class IS_Scanner {
 	 * Everything we know how to check for one file: heuristic pattern
 	 * scan and the "PHP hiding in uploads" check. Returns the number of
 	 * *new* findings recorded for this file.
+	 *
+	 * @param int    $run_id        Scan run ID findings are recorded against.
+	 * @param string $relative_path Path relative to ABSPATH.
+	 * @param array  $settings      Settings shaped like settings().
 	 */
 	private function scan_one_file( $run_id, $relative_path, array $settings ) {
 		$abs_path = trailingslashit( ABSPATH ) . $relative_path;
@@ -369,12 +419,39 @@ class IS_Scanner {
 						++$new_count;
 					}
 				}
+
+				// 3. Exact-hash signature match against the admin-curated
+				// known-bad-hash list -- reuses the content already read
+				// above rather than hashing the file a second time.
+				foreach ( IS_Signatures::scan_content( $content ) as $rule_hit ) {
+					$result = $this->db->record_finding(
+						$run_id,
+						array(
+							'file_path'  => $relative_path,
+							'issue_type' => 'signature_match',
+							'severity'   => $rule_hit['severity'],
+							'rule_id'    => $rule_hit['rule_id'],
+							'detail'     => $rule_hit['label'],
+							'file_hash'  => hash( 'sha256', $content ),
+						)
+					);
+					if ( $result['is_new'] ) {
+						++$new_count;
+					}
+				}
 			}
 		}
 
 		return $new_count;
 	}
 
+	/**
+	 * Marks a run completed: auto-resolves stale findings, updates the run
+	 * row, and sends the alert email if warranted.
+	 *
+	 * @param int    $run_id     Scan run ID being finished.
+	 * @param string $started_at Timestamp the run started at (MySQL format).
+	 */
 	private function finish_run( $run_id, $started_at ) {
 		$this->db->auto_resolve_stale_findings( $run_id, $started_at );
 		$this->db->update_run(
@@ -387,6 +464,12 @@ class IS_Scanner {
 		IS_Notifications::instance()->maybe_send_alert( $run_id );
 	}
 
+	/**
+	 * Marks a run as failed with an error message.
+	 *
+	 * @param int    $run_id  Scan run ID being failed.
+	 * @param string $message Human-readable error message to store.
+	 */
 	private function fail_run( $run_id, $message ) {
 		$this->db->update_run(
 			$run_id,
@@ -407,6 +490,9 @@ class IS_Scanner {
 	 * (0.3) over history (0.7) so the estimate adapts as file sizes/host
 	 * load change, without one unusually slow or fast batch swinging it
 	 * wildly. A non-positive previous value means "no history yet".
+	 *
+	 * @param float $previous_ms_per_file Previous average ms/file (0 or negative if none yet).
+	 * @param float $observed_ms_per_file This batch's observed average ms/file.
 	 */
 	public static function next_pace_average( $previous_ms_per_file, $observed_ms_per_file ) {
 		if ( $previous_ms_per_file <= 0 ) {
@@ -415,12 +501,21 @@ class IS_Scanner {
 		return ( $previous_ms_per_file * 0.7 ) + ( $observed_ms_per_file * 0.3 );
 	}
 
+	/**
+	 * Updates the stored moving-average pace with a newly observed batch.
+	 *
+	 * @param float $observed_ms_per_file This batch's observed average ms/file.
+	 */
 	private function record_pace( $observed_ms_per_file ) {
 		$previous = (float) get_option( 'is_avg_ms_per_file', 0 );
 		update_option( 'is_avg_ms_per_file', self::next_pace_average( $previous, $observed_ms_per_file ), false );
 	}
 
-	/** @return float|null Observed average ms/file, or null if no run has completed a batch yet. */
+	/**
+	 * Observed average ms/file, or null if no run has completed a batch yet.
+	 *
+	 * @return float|null Observed average ms/file, or null if no run has completed a batch yet.
+	 */
 	public static function average_ms_per_file() {
 		$value = get_option( 'is_avg_ms_per_file', 0 );
 		return $value > 0 ? (float) $value : null;
@@ -434,6 +529,8 @@ class IS_Scanner {
 	 * official release at all -- a dropped extra file there is at least
 	 * as suspicious as a modified one, and checksum-list iteration alone
 	 * can never see it.
+	 *
+	 * @param int $run_id Scan run ID findings are recorded against.
 	 */
 	public function check_core_integrity( $run_id ) {
 		$checker   = new IS_Core_Checksums();
@@ -493,7 +590,7 @@ class IS_Scanner {
 		// Unknown files: anything on disk under the two pure-core
 		// directories that the official release manifest doesn't list.
 		// (Deliberately not applied to the WP root, where hosts and
-		// drop-ins legitimately add files.)
+		// drop-ins legitimately add files).
 		foreach ( array( 'wp-admin', 'wp-includes' ) as $core_dir ) {
 			foreach ( $walker->list_files_under( $root . $core_dir ) as $relative_path ) {
 				if ( isset( $checksums[ $relative_path ] ) ) {
@@ -527,6 +624,7 @@ class IS_Scanner {
 	 * directory that isn't in its published manifest is a classic malware
 	 * drop location.
 	 *
+	 * @param int $run_id Scan run ID findings are recorded against.
 	 * @return array{checked:int,skipped:array,findings:int}
 	 */
 	public function check_plugin_integrity( $run_id ) {
@@ -554,7 +652,7 @@ class IS_Scanner {
 			foreach ( $checksums as $rel_path => $acceptable_hashes ) {
 				$abs = $root . $info['slug'] . '/' . $rel_path;
 				if ( ! file_exists( $abs ) ) {
-					continue; // file removed within the version -- not our business to flag
+					continue; // file removed within the version -- not our business to flag.
 				}
 				$actual_md5 = @md5_file( $abs ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
 				if ( false === $actual_md5 ) {
@@ -606,9 +704,10 @@ class IS_Scanner {
 						'severity'   => $is_php ? 'high' : 'low',
 						'rule_id'    => 'plugin_unknown_file',
 						'detail'     => sprintf(
-							/* translators: %s: plugin name */
 							$is_php
+								/* translators: %s: plugin name */
 								? __( 'This PHP file is not part of the official WordPress.org release of %s — extra files dropped into a plugin directory are a classic malware hiding spot.', 'integrity-sentinel' )
+								/* translators: %s: plugin name */
 								: __( 'This file is not part of the official WordPress.org release of %s.', 'integrity-sentinel' ),
 							$info['name']
 						),

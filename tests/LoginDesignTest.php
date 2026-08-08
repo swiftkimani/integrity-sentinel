@@ -1,0 +1,451 @@
+<?php
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Unit tests for the pure-logic pieces of IS_Login_Design (CSS/HTML
+ * assembly). The WP-dependent glue (login_enqueue_scripts, the settings
+ * filters, the preview transient) is exercised in a real WordPress, not
+ * here -- see class-is-login.php's own note on this split.
+ */
+class LoginDesignTest extends TestCase {
+
+	// ---- sanitize_css_for_style_tag ------------------------------------
+
+	public function test_neutralizes_style_tag_breakout() {
+		$css = IS_Login_Design::sanitize_css_for_style_tag( 'body{}</style><script>alert(1)</script>' );
+		$this->assertStringNotContainsString( '</style>', $css );
+		$this->assertStringContainsString( '<\\/style>', $css );
+	}
+
+	public function test_leaves_ordinary_css_untouched() {
+		$css = 'body.login{background:#fff;}';
+		$this->assertSame( $css, IS_Login_Design::sanitize_css_for_style_tag( $css ) );
+	}
+
+	// ---- is_hex_color ----------------------------------------------------
+
+	public function test_accepts_valid_hex_colors() {
+		foreach ( array( '#fff', '#ffffff', '#FF00aa', '#12345678' ) as $color ) {
+			$this->assertTrue( IS_Login_Design::is_hex_color( $color ), $color );
+		}
+	}
+
+	public function test_rejects_invalid_hex_colors() {
+		foreach ( array( 'red', '#gggggg', 'ffffff', '#12345', 'javascript:alert(1)' ) as $color ) {
+			$this->assertFalse( IS_Login_Design::is_hex_color( $color ), $color );
+		}
+	}
+
+	// ---- clamp_radius ------------------------------------------------------
+
+	public function test_clamps_radius_to_a_sane_range() {
+		$this->assertSame( 0, IS_Login_Design::clamp_radius( -5 ) );
+		$this->assertSame( 40, IS_Login_Design::clamp_radius( 999 ) );
+		$this->assertSame( 14, IS_Login_Design::clamp_radius( 14 ) );
+	}
+
+	public function test_clamp_radius_coerces_non_numeric_input() {
+		$this->assertSame( 0, IS_Login_Design::clamp_radius( 'not-a-number' ) );
+	}
+
+	// ---- is_http_url -----------------------------------------------------
+
+	public function test_accepts_http_and_https_urls() {
+		$this->assertTrue( IS_Login_Design::is_http_url( 'https://example.com/x.png' ) );
+		$this->assertTrue( IS_Login_Design::is_http_url( 'http://example.com/x.png' ) );
+	}
+
+	public function test_rejects_non_http_schemes() {
+		foreach ( array( 'javascript:alert(1)', 'data:text/html,x', 'ftp://example.com/x', '' ) as $url ) {
+			$this->assertFalse( IS_Login_Design::is_http_url( $url ), $url );
+		}
+	}
+
+	// ---- is_split_template -------------------------------------------------
+
+	public function test_split_templates_have_a_hero_panel() {
+		foreach ( array( 'sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean', 'carousel', 'terminal', 'polaroid' ) as $template ) {
+			$this->assertTrue( IS_Login_Design::is_split_template( $template ), $template );
+		}
+	}
+
+	public function test_minimal_is_not_a_split_template() {
+		$this->assertFalse( IS_Login_Design::is_split_template( 'minimal' ) );
+		$this->assertFalse( IS_Login_Design::is_split_template( 'unknown-key' ) );
+	}
+
+	// ---- build_css -----------------------------------------------------------
+
+	public function test_build_css_includes_the_chosen_accent_color_and_radius() {
+		$css = IS_Login_Design::build_css(
+			array(
+				'template'      => 'minimal',
+				'primary_color' => '#123456',
+				'border_radius' => 20,
+			)
+		);
+		$this->assertStringContainsString( '--is-login-color:#123456', $css );
+		$this->assertStringContainsString( '--is-login-radius:20px', $css );
+	}
+
+	public function test_build_css_falls_back_to_defaults_for_invalid_color() {
+		$css = IS_Login_Design::build_css( array( 'primary_color' => 'not-a-color' ) );
+		$this->assertStringContainsString( '--is-login-color:#6366f1', $css );
+	}
+
+	public function test_build_css_falls_back_to_default_template_for_unknown_key() {
+		$default_template = IS_Login_Design::default_settings()['template'];
+		$css_unknown       = IS_Login_Design::build_css( array( 'template' => 'does-not-exist' ) );
+		$css_default       = IS_Login_Design::build_css( array( 'template' => $default_template ) );
+		$this->assertSame( $css_default, $css_unknown );
+	}
+
+	public function test_build_css_only_accepts_http_s_logo_urls() {
+		$safe   = IS_Login_Design::build_css( array( 'logo_url' => 'https://example.com/logo.png' ) );
+		$unsafe = IS_Login_Design::build_css( array( 'logo_url' => 'javascript:alert(1)' ) );
+		$this->assertStringContainsString( 'background-image:url("https://example.com/logo.png")', $safe );
+		$this->assertStringNotContainsString( 'javascript:alert(1)', $unsafe );
+	}
+
+	public function test_build_css_strips_quotes_from_logo_url_to_prevent_style_breakout() {
+		// Even though logo_url is already esc_url_raw()'d + scheme-checked
+		// at save time, build_css() defends independently: an https:// URL
+		// that smuggles a closing quote (e.g. a crafted query string)
+		// could otherwise escape the url("...") context and inject
+		// arbitrary CSS/attempt further breakout into the <style> tag.
+		$css = IS_Login_Design::build_css(
+			array( 'logo_url' => 'https://evil.example/x");}body{background:url(https://evil.example/track.gif)}/*' )
+		);
+		$this->assertStringNotContainsString( '");}body', $css );
+		$this->assertStringContainsString( 'url("https://evil.example/x);}body{background:url(https://evil.example/track.gif)}/*")', $css );
+	}
+
+	public function test_build_css_strips_quotes_from_hero_image_url() {
+		$css = IS_Login_Design::build_css(
+			array(
+				'template'       => 'sunrise',
+				'hero_image_url' => 'https://evil.example/x");}body{color:red}/*',
+			)
+		);
+		$this->assertStringNotContainsString( '");}body', $css );
+	}
+
+	public function test_build_css_hides_generated_blobs_when_a_hero_image_is_set() {
+		$css = IS_Login_Design::build_css(
+			array(
+				'template'       => 'sunrise',
+				'hero_image_url' => 'https://example.com/photo.jpg',
+			)
+		);
+		$this->assertStringContainsString( 'url("https://example.com/photo.jpg")', $css );
+		$this->assertStringContainsString( '.is-login-hero .is-login-blob{display:none;}', $css );
+	}
+
+	public function test_build_css_only_adds_split_layout_for_split_templates() {
+		$split   = IS_Login_Design::build_css( array( 'template' => 'sunrise' ) );
+		$minimal = IS_Login_Design::build_css( array( 'template' => 'minimal' ) );
+		$this->assertStringContainsString( '.is-login-hero{', $split );
+		$this->assertStringNotContainsString( '.is-login-hero{', $minimal );
+	}
+
+	public function test_build_css_always_suppresses_the_default_wordpress_logo_mark() {
+		// Unconditional -- not just when a custom logo is set -- per the
+		// "no mention of WordPress anywhere on this page" requirement.
+		$css = IS_Login_Design::build_css( array() );
+		$this->assertStringContainsString( 'background-image:none', $css );
+	}
+
+	public function test_build_css_renders_the_configured_logo_even_with_branding_hidden() {
+		// Regression guard: hide_branding's suppression rule and the logo
+		// override rule must use selectors of EQUAL CSS specificity, or
+		// whichever is more specific wins regardless of which comes later
+		// in the stylesheet -- a real bug where a mismatched extra `div`
+		// type selector on the suppression rule made it always beat a
+		// configured logo, silently, since hide_branding defaults to on.
+		$css = IS_Login_Design::build_css(
+			array(
+				'logo_url'      => 'https://example.com/logo.png',
+				'hide_branding' => 1,
+			)
+		);
+
+		$this->assertMatchesRegularExpression( '/([a-z0-9 .#]+h1 a)\{background-image:none/', $css );
+		$this->assertMatchesRegularExpression( '/([a-z0-9 .#]+h1 a)\{background-image:url\("https:\/\/example\.com\/logo\.png"\)/', $css );
+
+		preg_match( '/([a-z0-9 .#]+h1 a)\{background-image:none/', $css, $none_match );
+		preg_match( '/([a-z0-9 .#]+h1 a)\{background-image:url\("https:\/\/example\.com\/logo\.png"\)/', $css, $logo_match );
+		$this->assertSame( trim( $none_match[1] ), trim( $logo_match[1] ), 'selectors must match exactly so specificity cannot diverge again' );
+
+		$none_pos = strpos( $css, $none_match[0] );
+		$logo_pos = strpos( $css, $logo_match[0] );
+		$this->assertGreaterThan( $none_pos, $logo_pos, 'the logo rule must come after (and therefore override) the suppression rule' );
+	}
+
+	public function test_build_css_appends_custom_css_with_breakout_guard() {
+		$css = IS_Login_Design::build_css( array( 'custom_css' => '.foo{}</style><script>x</script>' ) );
+		$this->assertStringContainsString( '.foo{}', $css );
+		$this->assertStringNotContainsString( '</style><script>', $css );
+	}
+
+	public function test_build_css_is_stable_for_each_built_in_template() {
+		foreach ( array_keys( IS_Login_Design::templates() ) as $template ) {
+			$css = IS_Login_Design::build_css( array( 'template' => $template ) );
+			$this->assertNotSame( '', trim( $css ), $template );
+		}
+	}
+
+	public function test_build_css_has_ten_templates() {
+		$this->assertCount( 10, IS_Login_Design::templates() );
+	}
+
+	public function test_build_css_places_hero_on_the_left_by_default() {
+		$css = IS_Login_Design::build_css( array( 'template' => 'sunrise' ) );
+		$this->assertStringContainsString( '.is-login-hero{left:0;}', $css );
+	}
+
+	public function test_build_css_places_hero_on_the_right_when_configured() {
+		$css = IS_Login_Design::build_css( array( 'template' => 'sunrise', 'hero_position' => 'right' ) );
+		$this->assertStringContainsString( '.is-login-hero{right:0;}', $css );
+		$this->assertStringNotContainsString( '.is-login-hero{left:0;}', $css );
+	}
+
+	public function test_build_css_rejects_an_invalid_hero_position() {
+		$css_bad     = IS_Login_Design::build_css( array( 'template' => 'sunrise', 'hero_position' => 'up' ) );
+		$css_default = IS_Login_Design::build_css( array( 'template' => 'sunrise', 'hero_position' => 'left' ) );
+		$this->assertSame( $css_default, $css_bad );
+	}
+
+	public function test_build_css_centers_the_form_over_a_full_bleed_hero() {
+		$css = IS_Login_Design::build_css( array( 'template' => 'sunrise', 'hero_position' => 'center' ) );
+		// Full-bleed hero + centered card, not a left/right split.
+		$this->assertStringContainsString( '.is-login-hero{position:fixed;inset:0;width:100%', $css );
+		$this->assertStringContainsString( 'justify-content:center', $css );
+		$this->assertStringNotContainsString( '.is-login-hero{left:0;}', $css );
+		$this->assertStringNotContainsString( '.is-login-hero{right:0;}', $css );
+		// Frosted card wins over the solid-white default (appended after it).
+		$this->assertStringContainsString( 'backdrop-filter:blur(16px)', $css );
+	}
+
+	public function test_hero_position_validates_the_three_placements() {
+		$this->assertSame( 'left', IS_Login_Design::hero_position( array() ) );
+		$this->assertSame( 'right', IS_Login_Design::hero_position( array( 'hero_position' => 'right' ) ) );
+		$this->assertSame( 'center', IS_Login_Design::hero_position( array( 'hero_position' => 'center' ) ) );
+		$this->assertSame( 'left', IS_Login_Design::hero_position( array( 'hero_position' => 'sideways' ) ) );
+	}
+
+	// ---- carousel indicators ---------------------------------------------
+
+	public function test_carousel_indicator_defaults_to_bars_and_rejects_unknown() {
+		$this->assertSame( 'bars', IS_Login_Design::carousel_indicator( array() ) );
+		$this->assertSame( 'dots', IS_Login_Design::carousel_indicator( array( 'carousel_indicator' => 'dots' ) ) );
+		$this->assertSame( 'bars', IS_Login_Design::carousel_indicator( array( 'carousel_indicator' => 'sparkles' ) ) );
+	}
+
+	public function test_carousel_indicator_bars_is_the_default_dot_markup() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'     => 'carousel',
+				'hero_gallery' => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ),
+			)
+		);
+		$this->assertStringContainsString( 'is-carousel-dots is-ind-bars', $html );
+		$this->assertSame( 2, substr_count( $html, '<button type="button" class="is-carousel-dot' ) );
+	}
+
+	public function test_carousel_indicator_thumbnails_render_mini_images() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'           => 'carousel',
+				'carousel_indicator' => 'thumbnails',
+				'hero_gallery'       => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ),
+			)
+		);
+		$this->assertStringContainsString( 'is-ind-thumbs', $html );
+		$this->assertStringContainsString( '<button type="button" class="is-carousel-dot is-active"><img src="https://example.com/1.jpg"', $html );
+	}
+
+	public function test_carousel_indicator_numbers_render_a_counter_not_dots() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'           => 'carousel',
+				'carousel_indicator' => 'numbers',
+				'hero_gallery'       => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg' ),
+			)
+		);
+		$this->assertStringContainsString( 'is-carousel-counter', $html );
+		$this->assertStringContainsString( '<span class="is-carousel-total">3</span>', $html );
+		$this->assertStringNotContainsString( 'is-carousel-dot', $html );
+	}
+
+	public function test_carousel_indicator_none_keeps_arrows_but_drops_dots() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'           => 'carousel',
+				'carousel_indicator' => 'none',
+				'hero_gallery'       => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ),
+			)
+		);
+		$this->assertStringContainsString( 'is-carousel-prev', $html );
+		$this->assertStringNotContainsString( 'is-carousel-dot', $html );
+		$this->assertStringNotContainsString( 'is-carousel-counter', $html );
+	}
+
+	public function test_carousel_slides_are_full_bleed_with_a_scrim() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'     => 'carousel',
+				'hero_gallery' => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ),
+			)
+		);
+		$this->assertStringContainsString( 'is-carousel-scrim', $html );
+	}
+
+	public function test_build_css_suppresses_wordpress_logo_when_hide_branding_is_on() {
+		$css = IS_Login_Design::build_css( array( 'hide_branding' => 1 ) );
+		$this->assertStringContainsString( 'background-image:none', $css );
+	}
+
+	public function test_build_css_leaves_stock_logo_when_hide_branding_is_off() {
+		$css = IS_Login_Design::build_css( array( 'hide_branding' => 0 ) );
+		$this->assertStringNotContainsString( 'background-image:none', $css );
+	}
+
+	// ---- build_hero_html --------------------------------------------------
+
+	public function test_build_hero_html_escapes_heading_and_subheading() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'hero_heading'    => '<script>alert(1)</script>',
+				'hero_subheading' => 'Tom & Jerry "quoted"',
+			)
+		);
+		$this->assertStringNotContainsString( '<script>alert(1)</script>', $html );
+		$this->assertStringContainsString( '&lt;script&gt;', $html );
+		$this->assertStringContainsString( 'Tom &amp; Jerry &quot;quoted&quot;', $html );
+	}
+
+	public function test_build_hero_html_omits_empty_heading_and_subheading() {
+		$html = IS_Login_Design::build_hero_html( array( 'hero_heading' => '', 'hero_subheading' => '' ) );
+		$this->assertStringNotContainsString( '<h2>', $html );
+		$this->assertStringNotContainsString( '<p>', $html );
+	}
+
+	public function test_build_hero_html_shows_generated_blobs_without_an_image() {
+		$html = IS_Login_Design::build_hero_html( array( 'hero_image_url' => '' ) );
+		$this->assertStringContainsString( 'is-login-blob', $html );
+	}
+
+	public function test_build_hero_html_omits_generated_blobs_with_an_image() {
+		$html = IS_Login_Design::build_hero_html( array( 'hero_image_url' => 'https://example.com/photo.jpg' ) );
+		$this->assertStringNotContainsString( 'is-login-blob', $html );
+	}
+
+	public function test_build_hero_html_is_marked_decorative() {
+		$html = IS_Login_Design::build_hero_html( array() );
+		$this->assertStringContainsString( 'aria-hidden="true"', $html );
+	}
+
+	// ---- carousel_images -------------------------------------------------
+
+	public function test_carousel_images_uses_the_gallery_when_set() {
+		$images = IS_Login_Design::carousel_images(
+			array(
+				'hero_gallery'   => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ),
+				'hero_image_url' => 'https://example.com/ignored.jpg',
+			)
+		);
+		$this->assertSame( array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ), $images );
+	}
+
+	public function test_carousel_images_falls_back_to_the_single_hero_image() {
+		$images = IS_Login_Design::carousel_images( array( 'hero_gallery' => array(), 'hero_image_url' => 'https://example.com/solo.jpg' ) );
+		$this->assertSame( array( 'https://example.com/solo.jpg' ), $images );
+	}
+
+	public function test_carousel_images_is_empty_when_nothing_is_set() {
+		$this->assertSame( array(), IS_Login_Design::carousel_images( array( 'hero_gallery' => array(), 'hero_image_url' => '' ) ) );
+	}
+
+	public function test_carousel_images_filters_out_non_http_urls() {
+		$images = IS_Login_Design::carousel_images( array( 'hero_gallery' => array( 'javascript:alert(1)', 'https://example.com/ok.jpg' ) ) );
+		$this->assertSame( array( 'https://example.com/ok.jpg' ), $images );
+	}
+
+	public function test_carousel_images_caps_at_eight() {
+		$gallery = array();
+		for ( $i = 0; $i < 12; $i++ ) {
+			$gallery[] = "https://example.com/{$i}.jpg";
+		}
+		$images = IS_Login_Design::carousel_images( array( 'hero_gallery' => $gallery ) );
+		$this->assertCount( 8, $images );
+	}
+
+	// ---- new templates: carousel/terminal/polaroid ---------------------------
+
+	public function test_build_css_is_stable_for_carousel_terminal_and_polaroid() {
+		foreach ( array( 'carousel', 'terminal', 'polaroid' ) as $template ) {
+			$css = IS_Login_Design::build_css( array( 'template' => $template ) );
+			$this->assertNotSame( '', trim( $css ), $template );
+		}
+	}
+
+	public function test_carousel_hero_html_renders_every_image_with_only_the_first_active() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'     => 'carousel',
+				'hero_gallery' => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg' ),
+			)
+		);
+		$this->assertSame( 3, substr_count( $html, 'is-carousel-slide' ) );
+		$this->assertStringContainsString( 'is-carousel-slide is-active" src="https://example.com/1.jpg"', $html );
+		$this->assertStringNotContainsString( 'is-carousel-slide is-active" src="https://example.com/2.jpg"', $html );
+	}
+
+	public function test_carousel_hero_html_shows_controls_only_with_multiple_images() {
+		$single = IS_Login_Design::build_hero_html( array( 'template' => 'carousel', 'hero_gallery' => array( 'https://example.com/1.jpg' ) ) );
+		$this->assertStringNotContainsString( 'is-carousel-controls', $single );
+
+		$multi = IS_Login_Design::build_hero_html( array( 'template' => 'carousel', 'hero_gallery' => array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ) ) );
+		$this->assertStringContainsString( 'is-carousel-controls', $multi );
+		// 'is-carousel-dot' is a prefix of the wrapping 'is-carousel-dots'
+		// container's own class, so match the dot buttons specifically.
+		$this->assertSame( 2, substr_count( $multi, '<button type="button" class="is-carousel-dot' ) );
+	}
+
+	public function test_carousel_hero_html_falls_back_to_blobs_with_no_images() {
+		$html = IS_Login_Design::build_hero_html( array( 'template' => 'carousel', 'hero_gallery' => array(), 'hero_image_url' => '' ) );
+		$this->assertStringContainsString( 'is-login-blob', $html );
+		$this->assertStringNotContainsString( 'is-carousel-frame', $html );
+	}
+
+	public function test_carousel_hero_html_escapes_image_urls() {
+		$html = IS_Login_Design::build_hero_html(
+			array(
+				'template'     => 'carousel',
+				'hero_gallery' => array( 'https://example.com/"><script>alert(1)</script>.jpg' ),
+			)
+		);
+		$this->assertStringNotContainsString( '<script>alert(1)</script>', $html );
+	}
+
+	public function test_polaroid_renders_a_real_img_tag_not_a_css_background() {
+		$html = IS_Login_Design::build_hero_html( array( 'template' => 'polaroid', 'hero_image_url' => 'https://example.com/photo.jpg' ) );
+		$this->assertStringContainsString( 'is-login-polaroid-photo', $html );
+		$this->assertStringContainsString( '<img src="https://example.com/photo.jpg" alt="">', $html );
+
+		$css = IS_Login_Design::build_css( array( 'template' => 'polaroid', 'hero_image_url' => 'https://example.com/photo.jpg' ) );
+		$this->assertStringNotContainsString( 'background-image:linear-gradient(180deg', $css );
+	}
+
+	public function test_terminal_hides_generated_blobs_even_without_an_image() {
+		$css = IS_Login_Design::build_css( array( 'template' => 'terminal' ) );
+		$this->assertStringContainsString( '.is-login-blob{display:none;}', $css );
+	}
+
+	public function test_carousel_js_targets_the_expected_dom_hooks() {
+		$js = IS_Login_Design::carousel_js();
+		foreach ( array( 'is-login-carousel', 'is-carousel-slide', 'is-carousel-dot', 'is-carousel-prev', 'is-carousel-next', 'prefers-reduced-motion' ) as $needle ) {
+			$this->assertStringContainsString( $needle, $js );
+		}
+	}
+}

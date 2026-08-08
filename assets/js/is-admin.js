@@ -245,10 +245,325 @@
 		});
 	}
 
+	// ---------------------------------------------------------------
+	// Login Design: template grid + live preview + media picker
+	// ---------------------------------------------------------------
+
+	var SPLIT_TEMPLATES = ['sunrise', 'aurora-night', 'bubblegum', 'forest', 'monochrome', 'ocean', 'carousel', 'terminal', 'polaroid'];
+
+	/** Wires an image URL field + Media Library picker + preview <img> + clear button, reused for the logo and the hero image. */
+	function initImagePicker(opts) {
+		var urlInput = document.getElementById(opts.urlId);
+		var previewImg = document.getElementById(opts.previewId);
+		var pickBtn = document.getElementById(opts.pickId);
+		var clearBtn = document.getElementById(opts.clearId);
+		if (!urlInput) {
+			return;
+		}
+
+		urlInput.addEventListener('input', function () {
+			var url = urlInput.value.trim();
+			if (previewImg) {
+				previewImg.src = url;
+				previewImg.style.display = url ? '' : 'none';
+			}
+			if (clearBtn) {
+				clearBtn.style.display = url ? '' : 'none';
+			}
+			if (opts.onChange) {
+				opts.onChange(url);
+			}
+		});
+
+		if (pickBtn) {
+			// window.wp.media is checked here, at click time, not when this
+			// listener is attached (page load) -- wp-media's own script can
+			// still be loading at that point since there's no explicit
+			// script dependency wiring it before is-admin.js, and checking
+			// only once up front would permanently skip attaching the
+			// listener if that race was lost.
+			pickBtn.addEventListener('click', function (e) {
+				e.preventDefault();
+				if (!window.wp || !window.wp.media) {
+					window.alert('The media library is still loading -- please wait a moment and try again.');
+					return;
+				}
+				var frame = window.wp.media({ title: opts.mediaTitle || 'Select an image', multiple: false, library: { type: 'image' } });
+				frame.on('select', function () {
+					var attachment = frame.state().get('selection').first().toJSON();
+					urlInput.value = attachment.url;
+					urlInput.dispatchEvent(new Event('input'));
+				});
+				frame.open();
+			});
+		}
+
+		if (clearBtn) {
+			clearBtn.addEventListener('click', function () {
+				urlInput.value = '';
+				urlInput.dispatchEvent(new Event('input'));
+			});
+		}
+	}
+
+	/**
+	 * Visual carousel-gallery picker: a thumbnail strip + "Add from Media
+	 * Library" (multi-select) button, backed by the existing newline-per-URL
+	 * textarea (still the form's source of truth, so the PHP sanitizer is
+	 * untouched). Editing the textarea by hand re-renders the strip.
+	 */
+	function initGalleryPicker() {
+		var textarea = document.getElementById('is-hero-gallery');
+		var thumbs = document.getElementById('is-gallery-thumbs');
+		var addBtn = document.getElementById('is-gallery-add');
+		if (!textarea || !thumbs) {
+			return;
+		}
+		var MAX = 8;
+
+		function read() {
+			return textarea.value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+		}
+		function write(list) {
+			textarea.value = list.slice(0, MAX).join('\n');
+			render();
+		}
+		function render() {
+			var list = read();
+			thumbs.innerHTML = '';
+			list.forEach(function (url, i) {
+				var cell = document.createElement('div');
+				cell.className = 'is-gallery-thumb';
+				var img = document.createElement('img');
+				img.src = url;
+				img.alt = '';
+				var remove = document.createElement('button');
+				remove.type = 'button';
+				remove.className = 'is-gallery-thumb-remove';
+				remove.setAttribute('aria-label', 'Remove image');
+				remove.textContent = '×';
+				remove.addEventListener('click', function () {
+					var next = read();
+					next.splice(i, 1);
+					write(next);
+				});
+				cell.appendChild(img);
+				cell.appendChild(remove);
+				thumbs.appendChild(cell);
+			});
+			if (addBtn) {
+				addBtn.disabled = list.length >= MAX;
+			}
+		}
+
+		textarea.addEventListener('input', render);
+
+		if (addBtn) {
+			addBtn.addEventListener('click', function (e) {
+				e.preventDefault();
+				if (!window.wp || !window.wp.media) {
+					window.alert('The media library is still loading -- please wait a moment and try again.');
+					return;
+				}
+				var frame = window.wp.media({ title: 'Select carousel images', multiple: 'add', library: { type: 'image' } });
+				frame.on('select', function () {
+					var selection = frame.state().get('selection');
+					var list = read();
+					selection.each(function (attachment) {
+						var url = attachment.toJSON().url;
+						if (url && list.indexOf(url) === -1) {
+							list.push(url);
+						}
+					});
+					write(list);
+				});
+				frame.open();
+			});
+		}
+
+		render();
+	}
+
+	function initLoginDesignPreview() {
+		var preview = document.getElementById('is-login-preview');
+		if (!preview) {
+			return;
+		}
+
+		var colorInput = document.getElementById('is-login-color');
+		var radiusInput = document.getElementById('is-login-radius');
+		var radiusOutput = document.getElementById('is-login-radius-value');
+		var previewLogo = document.getElementById('is-login-preview-logo');
+		var previewHeading = document.getElementById('is-login-preview-heading');
+		var previewSubheading = document.getElementById('is-login-preview-subheading');
+		var previewHero = document.getElementById('is-login-preview-hero');
+		var heroFields = document.getElementById('is-hero-fields');
+		var headingInput = document.getElementById('is-hero-heading');
+		var subheadingInput = document.getElementById('is-hero-subheading');
+		var templateRadios = document.querySelectorAll('#is-template-grid input[type="radio"]');
+		var positionRadios = document.querySelectorAll('input[name="is_login_design_settings[hero_position]"]');
+
+		function applyTemplate(template) {
+			preview.setAttribute('data-template', template);
+			var isSplit = SPLIT_TEMPLATES.indexOf(template) !== -1;
+			if (previewHero) {
+				previewHero.style.display = isSplit ? '' : 'none';
+			}
+			if (heroFields) {
+				heroFields.style.opacity = isSplit ? '' : '.4';
+			}
+			var isCarousel = 'carousel' === template;
+			['is-carousel-gallery-row', 'is-carousel-indicator-row'].forEach(function (id) {
+				var row = document.getElementById(id);
+				if (row) {
+					row.style.display = isCarousel ? '' : 'none';
+				}
+			});
+		}
+
+		function applyPosition(position) {
+			var value = (position === 'right' || position === 'center') ? position : 'left';
+			preview.setAttribute('data-position', value);
+		}
+
+		templateRadios.forEach(function (radio) {
+			radio.addEventListener('change', function () {
+				applyTemplate(radio.value);
+				templateRadios.forEach(function (r) {
+					r.closest('.is-template-card').classList.toggle('is-selected', r.checked);
+				});
+			});
+			if (radio.checked) {
+				applyTemplate(radio.value);
+			}
+		});
+
+		positionRadios.forEach(function (radio) {
+			radio.addEventListener('change', function () {
+				if (radio.checked) {
+					applyPosition(radio.value);
+				}
+			});
+			if (radio.checked) {
+				applyPosition(radio.value);
+			}
+		});
+
+		if (colorInput) {
+			colorInput.addEventListener('input', function () {
+				preview.style.setProperty('--is-login-color', colorInput.value);
+			});
+		}
+
+		if (radiusInput) {
+			radiusInput.addEventListener('input', function () {
+				preview.style.setProperty('--is-login-radius', radiusInput.value + 'px');
+				if (radiusOutput) {
+					radiusOutput.textContent = radiusInput.value + 'px';
+				}
+			});
+		}
+
+		if (headingInput && previewHeading) {
+			headingInput.addEventListener('input', function () {
+				previewHeading.textContent = headingInput.value;
+			});
+		}
+
+		if (subheadingInput && previewSubheading) {
+			subheadingInput.addEventListener('input', function () {
+				previewSubheading.textContent = subheadingInput.value;
+			});
+		}
+
+		initImagePicker({
+			urlId: 'is-login-logo-url',
+			previewId: 'is-login-logo-preview',
+			pickId: 'is-login-logo-pick',
+			clearId: 'is-login-logo-clear',
+			mediaTitle: 'Select a logo',
+			onChange: function (url) {
+				if (!previewLogo) {
+					return;
+				}
+				previewLogo.innerHTML = url ? '<img src="' + url.replace(/"/g, '&quot;') + '" alt="">' : previewLogo.textContent;
+			}
+		});
+
+		initImagePicker({
+			urlId: 'is-hero-image-url',
+			previewId: 'is-hero-image-preview',
+			pickId: 'is-hero-image-pick',
+			clearId: 'is-hero-image-clear',
+			mediaTitle: 'Select a hero image'
+		});
+
+		initGalleryPicker();
+
+		// "Open real preview": save an unsaved draft server-side and open
+		// the actual wp-login.php rendering it, instead of the stand-in
+		// mockup above. window.open() is called synchronously (before the
+		// fetch resolves) so browsers don't treat it as a blocked popup.
+		var previewBtn = document.getElementById('is-login-preview-btn');
+		var designForm = document.getElementById('is-login-design-form');
+		if (previewBtn && designForm) {
+			previewBtn.addEventListener('click', function () {
+				var status = document.getElementById('is-login-preview-status');
+				var win = window.open('', '_blank');
+				var body = new FormData(designForm);
+				body.append('action', 'is_preview_login_design');
+				body.append('nonce', window.ISAdmin.nonce);
+				if (status) {
+					status.textContent = 'Preparing preview…';
+				}
+				// Read as text first, not r.json() directly: a PHP notice/
+				// warning ahead of the real JSON output (or a nonce
+				// failure, which wp_die()s a bare "-1") would otherwise
+				// fail silently inside r.json() with no way to tell why.
+				fetch(window.ISAdmin.ajaxUrl, { method: 'POST', credentials: 'same-origin', body: body })
+					.then(function (r) { return r.text(); })
+					.then(function (text) {
+						var res;
+						try {
+							res = JSON.parse(text);
+						} catch (parseErr) {
+							console.error('[Integrity Sentinel] preview request returned a non-JSON response:', text);
+							throw parseErr;
+						}
+						if (res && res.success && res.data && res.data.preview_url && win) {
+							win.location.href = res.data.preview_url;
+							if (status) {
+								status.textContent = '';
+							}
+						} else {
+							if (win) {
+								win.close();
+							}
+							var message = res && res.data && res.data.message ? res.data.message : 'Could not open preview.';
+							if (status) {
+								status.textContent = message;
+							}
+							console.error('[Integrity Sentinel] preview request failed:', res);
+						}
+					})
+					.catch(function (err) {
+						if (win) {
+							win.close();
+						}
+						if (status) {
+							status.textContent = 'Could not open preview.';
+						}
+						console.error('[Integrity Sentinel] preview request error:', err);
+					});
+			});
+		}
+	}
+
 	document.addEventListener('DOMContentLoaded', function () {
 		initScanButton();
 		initFindingActions();
 		initFindingModal();
 		initQuarantineDeleteToggles();
+		initLoginDesignPreview();
 	});
 })();

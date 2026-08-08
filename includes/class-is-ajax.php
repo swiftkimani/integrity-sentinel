@@ -1,4 +1,10 @@
 <?php
+/**
+ * Admin-ajax endpoints backing the Dashboard's scan controls and finding actions.
+ *
+ * @package Integrity_Sentinel
+ */
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -13,9 +19,17 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class IS_Ajax {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var IS_Ajax|null
+	 */
 	private static $instance = null;
 	const NONCE_ACTION       = 'is_ajax_nonce';
 
+	/**
+	 * Returns the singleton instance, creating and hooking it on first call.
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -24,14 +38,21 @@ class IS_Ajax {
 		return self::$instance;
 	}
 
+	/**
+	 * Registers this module's admin-ajax action hooks.
+	 */
 	private function hooks() {
 		add_action( 'wp_ajax_is_start_scan', array( $this, 'start_scan' ) );
 		add_action( 'wp_ajax_is_scan_batch', array( $this, 'scan_batch' ) );
 		add_action( 'wp_ajax_is_scan_status', array( $this, 'scan_status' ) );
 		add_action( 'wp_ajax_is_set_finding_status', array( $this, 'set_finding_status' ) );
 		add_action( 'wp_ajax_is_view_finding', array( $this, 'view_finding' ) );
+		add_action( 'wp_ajax_is_preview_login_design', array( $this, 'preview_login_design' ) );
 	}
 
+	/**
+	 * Rejects the request unless the current user can manage_options and the request carries a valid plugin nonce.
+	 */
 	private function guard() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_send_json_error( array( 'message' => __( 'Insufficient permissions.', 'integrity-sentinel' ) ), 403 );
@@ -39,6 +60,9 @@ class IS_Ajax {
 		check_ajax_referer( self::NONCE_ACTION, 'nonce' );
 	}
 
+	/**
+	 * Starts a new manual scan run and returns its run ID.
+	 */
 	public function start_scan() {
 		$this->guard();
 		$scanner = new IS_Scanner();
@@ -46,9 +70,12 @@ class IS_Ajax {
 		wp_send_json_success( array( 'run_id' => $run_id ) );
 	}
 
+	/**
+	 * Processes the next batch of a running scan and returns its progress.
+	 */
 	public function scan_batch() {
 		$this->guard();
-		$run_id = isset( $_POST['run_id'] ) ? (int) $_POST['run_id'] : 0;
+		$run_id = isset( $_POST['run_id'] ) ? (int) $_POST['run_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard() -> check_ajax_referer()
 		if ( ! $run_id ) {
 			wp_send_json_error( array( 'message' => __( 'Missing run id.', 'integrity-sentinel' ) ) );
 		}
@@ -64,6 +91,9 @@ class IS_Ajax {
 		wp_send_json_success( $progress );
 	}
 
+	/**
+	 * Returns whether a scan is currently running and, if so, its progress.
+	 */
 	public function scan_status() {
 		$this->guard();
 		$db  = IS_DB::instance();
@@ -81,10 +111,13 @@ class IS_Ajax {
 		);
 	}
 
+	/**
+	 * Updates a finding's status (acknowledged/ignored/resolved/new) and records the change to the audit log.
+	 */
 	public function set_finding_status() {
 		$this->guard();
-		$id     = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0;
-		$status = isset( $_POST['status'] ) ? sanitize_key( wp_unslash( $_POST['status'] ) ) : '';
+		$id     = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard() -> check_ajax_referer()
+		$status = isset( $_POST['status'] ) ? sanitize_key( wp_unslash( $_POST['status'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard() -> check_ajax_referer()
 
 		if ( ! $id || ! in_array( $status, array( 'acknowledged', 'ignored', 'resolved', 'new' ), true ) ) {
 			wp_send_json_error( array( 'message' => __( 'Invalid request.', 'integrity-sentinel' ) ) );
@@ -118,7 +151,7 @@ class IS_Ajax {
 	 */
 	public function view_finding() {
 		$this->guard();
-		$id      = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0;
+		$id      = isset( $_POST['finding_id'] ) ? (int) $_POST['finding_id'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified above via guard() -> check_ajax_referer()
 		$finding = $id ? IS_DB::instance()->get_finding( $id ) : null;
 
 		if ( ! $finding ) {
@@ -128,18 +161,38 @@ class IS_Ajax {
 		$meta = json_decode( $finding['meta'] ?? '', true );
 		wp_send_json_success(
 			array(
-				'file_path' => $finding['file_path'],
-				'issue_type' => $finding['issue_type'],
-				'severity'   => $finding['severity'],
-				'detail'     => $finding['detail'],
-				'line'       => $meta['line'] ?? null,
-				'snippet'    => $meta['snippet'] ?? null,
-				'matches'    => $meta['matches'] ?? null,
+				'file_path'    => $finding['file_path'],
+				'issue_type'   => $finding['issue_type'],
+				'severity'     => $finding['severity'],
+				'detail'       => $finding['detail'],
+				'line'         => $meta['line'] ?? null,
+				'snippet'      => $meta['snippet'] ?? null,
+				'matches'      => $meta['matches'] ?? null,
 				'expected_md5' => $meta['expected_md5'] ?? null,
-				'file_hash'  => $finding['file_hash'],
-				'first_seen' => $finding['first_seen'],
-				'last_seen'  => $finding['last_seen'],
+				'file_hash'    => $finding['file_hash'],
+				'first_seen'   => $finding['first_seen'],
+				'last_seen'    => $finding['last_seen'],
 			)
 		);
+	}
+
+	/**
+	 * Stores a short-lived, per-admin draft of in-progress Login Design
+	 * edits so the settings page can open a real preview of wp-login.php
+	 * without saving anything yet. Runs the exact same sanitizer the real
+	 * save path uses (IS_Admin::sanitize_login_design_input()), so a
+	 * preview can never render anything a genuine save wouldn't also
+	 * allow -- see IS_Login_Design::preview_override().
+	 */
+	public function preview_login_design() {
+		$this->guard();
+		// Same field name/shape the real settings form posts to options.php
+		// with, so the JS can hand over a FormData(form) of the in-progress
+		// (possibly unsaved) fields verbatim -- see initLoginDesignPreview()
+		// in is-admin.js.
+		$raw   = isset( $_POST['is_login_design_settings'] ) && is_array( $_POST['is_login_design_settings'] ) ? wp_unslash( $_POST['is_login_design_settings'] ) : array(); // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- verified above via guard() -> check_ajax_referer(); sanitize_login_design_input() below is the sanitizer
+		$draft = IS_Admin::instance()->sanitize_login_design_input( $raw, IS_Login_Design::settings() );
+		IS_Login_Design::store_preview( $draft );
+		wp_send_json_success( array( 'preview_url' => add_query_arg( 'is_preview', '1', wp_login_url() ) ) );
 	}
 }

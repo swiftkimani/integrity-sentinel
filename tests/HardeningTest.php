@@ -85,4 +85,70 @@ class HardeningTest extends TestCase {
 		$this->assertNotContains( 'exec', $still );
 		$this->assertNotContains( 'system', $still );
 	}
+
+	// ---- duplicate_salt_names -------------------------------------------
+
+	public function test_no_duplicates_among_distinct_salts() {
+		$salts = array(
+			'AUTH_KEY'   => 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+			'AUTH_SALT'  => 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+		);
+		$this->assertSame( array(), IS_Hardening::duplicate_salt_names( $salts ) );
+	}
+
+	public function test_flags_two_identical_salts() {
+		$salts = array(
+			'AUTH_KEY'  => 'same-value-same-value-same-value',
+			'AUTH_SALT' => 'same-value-same-value-same-value',
+		);
+		$result = IS_Hardening::duplicate_salt_names( $salts );
+		$this->assertContains( 'AUTH_KEY', $result );
+		$this->assertContains( 'AUTH_SALT', $result );
+		$this->assertCount( 2, $result );
+	}
+
+	public function test_ignores_empty_or_non_string_values() {
+		$salts = array(
+			'AUTH_KEY'  => '',
+			'AUTH_SALT' => null,
+		);
+		$this->assertSame( array(), IS_Hardening::duplicate_salt_names( $salts ) );
+	}
+
+	public function test_three_way_duplicate_lists_all_three_once() {
+		$salts = array(
+			'AUTH_KEY'        => 'dupe',
+			'AUTH_SALT'       => 'dupe',
+			'SECURE_AUTH_KEY' => 'dupe',
+			'NONCE_KEY'       => 'unique',
+		);
+		$result = IS_Hardening::duplicate_salt_names( $salts );
+		sort( $result );
+		$this->assertSame( array( 'AUTH_KEY', 'AUTH_SALT', 'SECURE_AUTH_KEY' ), $result );
+	}
+
+	// ---- options_with_plaintext_secrets -----------------------------------
+
+	public function test_flags_an_option_with_a_non_empty_api_key() {
+		$all = array( 'is_vulnerability_scanner_settings' => array( 'api_key' => 'abc123' ) );
+		$this->assertSame( array( 'is_vulnerability_scanner_settings' ), IS_Hardening::options_with_plaintext_secrets( $all ) );
+	}
+
+	public function test_ignores_an_option_with_no_secret_configured() {
+		$all = array( 'is_vulnerability_scanner_settings' => array( 'api_key' => '' ) );
+		$this->assertSame( array(), IS_Hardening::options_with_plaintext_secrets( $all ) );
+	}
+
+	public function test_flags_multiple_secret_fields_in_one_option() {
+		$all = array( 'is_threat_intel_settings' => array( 'abuseipdb_key' => 'x', 'virustotal_key' => 'y' ) );
+		$this->assertSame( array( 'is_threat_intel_settings' ), IS_Hardening::options_with_plaintext_secrets( $all ) );
+	}
+
+	public function test_flags_each_option_at_most_once() {
+		$all = array(
+			'is_vulnerability_scanner_settings' => array( 'api_key' => 'abc123' ),
+			'is_threat_intel_settings'          => array( 'abuseipdb_key' => 'x' ),
+		);
+		$this->assertSame( array( 'is_vulnerability_scanner_settings', 'is_threat_intel_settings' ), IS_Hardening::options_with_plaintext_secrets( $all ) );
+	}
 }

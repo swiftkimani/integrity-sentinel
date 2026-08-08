@@ -80,3 +80,6 @@ require_once dirname( __DIR__ ) . '/includes/class-is-cron.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-scanner.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-quarantine.php';
 require_once dirname( __DIR__ ) . '/includes/class-is-bas.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-domain-intel.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-ransomware-canary.php';
+require_once dirname( __DIR__ ) . '/includes/class-is-secrets.php';

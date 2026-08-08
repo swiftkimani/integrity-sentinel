@@ -3,7 +3,7 @@
  * Plugin Name:       Integrity Sentinel — Malware Scanner & Hardening Suite
  * Plugin URI:        https://example.com/integrity-sentinel
  * Description:       File-integrity scanning (core/plugin checksums, malware/webshell patterns, obfuscation detection) plus a full hardening suite: access control, login/2FA protection, HTTP/REST hardening, hotlink and AI-bot blocking, and a human-in-the-loop quarantine engine. Batched, resumable scans, a findings dashboard, email alerts, and a WP-CLI command.
- * Version:           1.24.0
+ * Version:           1.25.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Your Org
@@ -18,13 +18,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'IS_VERSION', '1.24.0' );
+define( 'IS_VERSION', '1.25.0' );
 define( 'IS_PLUGIN_FILE', __FILE__ );
 define( 'IS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'IS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'IS_CRON_DAILY_SCAN', 'is_daily_scan_cron' );
 define( 'IS_CRON_RESUME_SCAN', 'is_resume_scan_cron' );
-define( 'IS_DB_VERSION', '4' );
+define( 'IS_DB_VERSION', '5' );
 
 /**
  * Simple class autoloader, same rationale as the directory plugin: this

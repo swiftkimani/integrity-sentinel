@@ -450,6 +450,61 @@ class IS_Admin {
 				'sanitize_callback' => array( $this, 'sanitize_custom_detections_settings' ),
 			)
 		);
+		register_setting(
+			'is_domain_intel_settings_group',
+			'is_domain_intel_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_domain_intel_settings' ),
+			)
+		);
+		register_setting(
+			'is_ransomware_canary_settings_group',
+			'is_ransomware_canary_settings',
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( $this, 'sanitize_ransomware_canary_settings' ),
+			)
+		);
+	}
+
+	/**
+	 * Sanitizes the domain-intel settings (just the enabled flag).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_domain_intel_settings( $input ) {
+		$old = IS_Domain_Intel::settings();
+		$out = array( 'enabled' => empty( $input['enabled'] ) ? 0 : 1 );
+
+		if ( $out['enabled'] !== $old['enabled'] ) {
+			IS_Audit_Log::record( 'domain_intel_settings_changed', array( 'enabled' => $out['enabled'] ) );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Sanitizes the ransomware-canary settings (enabled flag, threshold ratio, per-scope minimum file counts).
+	 *
+	 * @param array $input Raw settings submitted from the form.
+	 */
+	public function sanitize_ransomware_canary_settings( $input ) {
+		$old           = IS_Ransomware_Canary::settings();
+		$threshold_pct = (float) ( $input['threshold_ratio'] ?? 50 ); // Form field is a 5-100 percentage; stored as a 0.05-1 fraction.
+		$out           = array(
+			'enabled'              => empty( $input['enabled'] ) ? 0 : 1,
+			'threshold_ratio'      => max( 0.05, min( 1, $threshold_pct / 100 ) ),
+			'min_files_uploads'    => max( 1, (int) ( $input['min_files_uploads'] ?? 50 ) ),
+			'min_files_themes'     => max( 1, (int) ( $input['min_files_themes'] ?? 15 ) ),
+			'min_files_mu_plugins' => max( 1, (int) ( $input['min_files_mu_plugins'] ?? 3 ) ),
+		);
+
+		if ( $out['enabled'] !== $old['enabled'] ) {
+			IS_Audit_Log::record( 'ransomware_canary_settings_changed', array( 'enabled' => $out['enabled'] ) );
+		}
+
+		return $out;
 	}
 
 	/**
@@ -746,6 +801,7 @@ class IS_Admin {
 			'enumeration_detection'    => empty( $input['enumeration_detection'] ) ? 0 : 1,
 			'enumeration_threshold'    => max( 5, min( 1000, (int) ( $input['enumeration_threshold'] ?? 20 ) ) ),
 			'block_on_enumeration'     => empty( $input['block_on_enumeration'] ) ? 0 : 1,
+			'route_audit_exclusions'   => sanitize_textarea_field( $input['route_audit_exclusions'] ?? '' ),
 		);
 
 		$changed = array();
@@ -2207,6 +2263,10 @@ class IS_Admin {
 
 			<?php $this->render_threat_intel_section(); ?>
 
+			<?php $this->render_domain_intel_section(); ?>
+
+			<?php $this->render_ransomware_canary_section(); ?>
+
 			<h2><?php esc_html_e( 'Hardening checks', 'integrity-sentinel' ); ?></h2>
 			<p>
 				<?php esc_html_e( 'Every scan also audits site configuration: the file editor, debug output, auth salts, world-writable paths, exposed .git/.env/debug.log files, backup archives in the webroot, administrator accounts, plugins closed on WordPress.org, and more. Results appear under Findings alongside file-integrity issues.', 'integrity-sentinel' ); ?>
@@ -2668,6 +2728,84 @@ class IS_Admin {
 			<?php wp_nonce_field( 'is_threat_intel_action' ); ?>
 			<input type="hidden" name="action" value="is_download_sbom">
 			<?php submit_button( __( 'Download SBOM (JSON)', 'integrity-sentinel' ), 'secondary', 'submit', false ); ?>
+		</form>
+		<?php
+	}
+
+	/**
+	 * Domain-phishing intelligence: typosquat DNS checks and Certificate
+	 * Transparency monitoring for the site's own domain.
+	 */
+	private function render_domain_intel_section() {
+		$settings = IS_Domain_Intel::settings();
+		?>
+		<h2><?php esc_html_e( 'Domain-phishing intelligence', 'integrity-sentinel' ); ?></h2>
+		<p>
+			<?php esc_html_e( 'Generates common typosquat variants of this site\'s own domain (character swaps, homoglyphs, TLD swaps) and checks whether any are already registered, plus watches Certificate Transparency logs (crt.sh, free and keyless) for a TLS certificate issued on one — an early signal of active phishing infrastructure targeting this site, sometimes visible before the phishing page itself is even live.', 'integrity-sentinel' ); ?>
+		</p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_domain_intel_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_domain_intel_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Check for typosquat domains and lookalike TLS certificates on every scan.', 'integrity-sentinel' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'DNS checks run every scan; crt.sh lookups are paced across several days for a large variant set, so results appear gradually.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save domain-intel settings', 'integrity-sentinel' ) ); ?>
+		</form>
+		<?php
+	}
+
+	/**
+	 * Ransomware/mass-defacement velocity canary: mass file-change
+	 * detection for uploads/themes/mu-plugins, the surface with no
+	 * checksum-based drift detection at all.
+	 */
+	private function render_ransomware_canary_section() {
+		$settings = IS_Ransomware_Canary::settings();
+		?>
+		<h2><?php esc_html_e( 'Ransomware / mass-defacement canary', 'integrity-sentinel' ); ?></h2>
+		<p>
+			<?php esc_html_e( 'Tracks a per-file hash for uploads, themes, and mu-plugins — the parts of a WordPress install core/plugin checksums can\'t already verify — and flags an abrupt, large-scale change between two scans as a strong signal of ransomware or mass defacement, rather than routine editing.', 'integrity-sentinel' ); ?>
+		</p>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'is_ransomware_canary_settings_group' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="is_ransomware_canary_settings[enabled]" value="1" <?php checked( $settings['enabled'], 1 ); ?>>
+							<?php esc_html_e( 'Track file-change velocity on every scan.', 'integrity-sentinel' ); ?>
+						</label>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="is_rc_threshold"><?php esc_html_e( 'Alarm threshold', 'integrity-sentinel' ); ?></label></th>
+					<td>
+						<input type="number" min="5" max="100" step="1" id="is_rc_threshold" name="is_ransomware_canary_settings[threshold_ratio]" value="<?php echo esc_attr( (int) round( $settings['threshold_ratio'] * 100 ) ); ?>" class="small-text">%
+						<p class="description"><?php esc_html_e( 'Flag a scope when at least this percentage of its tracked files changed since the last scan.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Minimum files before evaluating', 'integrity-sentinel' ); ?></th>
+					<td>
+						<label><?php esc_html_e( 'Uploads:', 'integrity-sentinel' ); ?> <input type="number" min="1" name="is_ransomware_canary_settings[min_files_uploads]" value="<?php echo esc_attr( $settings['min_files_uploads'] ); ?>" class="small-text"></label>
+						&nbsp;
+						<label><?php esc_html_e( 'Themes:', 'integrity-sentinel' ); ?> <input type="number" min="1" name="is_ransomware_canary_settings[min_files_themes]" value="<?php echo esc_attr( $settings['min_files_themes'] ); ?>" class="small-text"></label>
+						&nbsp;
+						<label><?php esc_html_e( 'mu-plugins:', 'integrity-sentinel' ); ?> <input type="number" min="1" name="is_ransomware_canary_settings[min_files_mu_plugins]" value="<?php echo esc_attr( $settings['min_files_mu_plugins'] ); ?>" class="small-text"></label>
+						<p class="description"><?php esc_html_e( 'A scope with fewer tracked files than this is never evaluated, to avoid noise on a small directory.', 'integrity-sentinel' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save ransomware-canary settings', 'integrity-sentinel' ) ); ?>
 		</form>
 		<?php
 	}
@@ -3414,6 +3552,13 @@ class IS_Admin {
 							<p class="description"><?php esc_html_e( 'One route prefix per line (e.g. wp/v2/oembed). Only used when restriction above is enabled. This plugin\'s own endpoint below is always allowed — it enforces its own authentication.', 'integrity-sentinel' ); ?></p>
 						</td>
 					</tr>
+					<tr>
+						<th scope="row"><label for="is_rest_route_audit_exclusions"><?php esc_html_e( 'Route audit exclusions', 'integrity-sentinel' ); ?></label></th>
+						<td>
+							<textarea id="is_rest_route_audit_exclusions" name="is_rest_api_settings[route_audit_exclusions]" rows="4" class="large-text code"><?php echo esc_textarea( $api['route_audit_exclusions'] ); ?></textarea>
+							<p class="description"><?php esc_html_e( 'One route prefix per line. The route audit below flags unprotected write routes as findings; add a prefix here to suppress a reviewed-and-intentional one (e.g. a known public-write endpoint from another plugin) without disabling the whole check.', 'integrity-sentinel' ); ?></p>
+						</td>
+					</tr>
 				</table>
 
 				<h3><?php esc_html_e( 'Rate limiting & abuse detection', 'integrity-sentinel' ); ?></h3>
@@ -3478,6 +3623,46 @@ class IS_Admin {
 				</table>
 				<?php submit_button( __( 'Save endpoint settings', 'integrity-sentinel' ) ); ?>
 			</form>
+
+			<h2><?php esc_html_e( 'Route audit', 'integrity-sentinel' ); ?></h2>
+			<p class="description">
+				<?php esc_html_e( 'Every REST route currently registered — WordPress core\'s and every installed plugin\'s, not just this plugin\'s own — with no real permission check. Read-only routes are shown for visibility only; only unprotected write routes (bold) also appear as a Findings entry.', 'integrity-sentinel' ); ?>
+			</p>
+			<?php
+			$route_audit = IS_Rest_API::audit_registered_routes();
+			$excluded    = IS_Rest_API::parse_route_list( $api['route_audit_exclusions'] );
+			?>
+			<?php if ( empty( $route_audit ) ) : ?>
+				<p><?php esc_html_e( 'No unprotected routes found.', 'integrity-sentinel' ); ?></p>
+			<?php else : ?>
+				<table class="widefat striped">
+					<thead>
+						<tr>
+							<th><?php esc_html_e( 'Route', 'integrity-sentinel' ); ?></th>
+							<th><?php esc_html_e( 'Methods', 'integrity-sentinel' ); ?></th>
+							<th><?php esc_html_e( 'Status', 'integrity-sentinel' ); ?></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ( $route_audit as $item ) : ?>
+							<?php $is_write = 'high' === $item['severity']; ?>
+							<tr>
+								<td><code><?php echo $is_write ? '<strong>' . esc_html( $item['route'] ) . '</strong>' : esc_html( $item['route'] ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- $item['route'] is escaped via esc_html() on both branches, only the wrapping <strong> tag is a literal ?></code></td>
+								<td><?php echo esc_html( implode( ', ', $item['methods'] ) ); ?></td>
+								<td>
+									<?php if ( IS_Rest_API::route_excluded_from_audit( $item['route'], $excluded ) ) : ?>
+										<span class="is-badge is-badge-low"><?php esc_html_e( 'Excluded', 'integrity-sentinel' ); ?></span>
+									<?php elseif ( $is_write ) : ?>
+										<span class="is-badge is-badge-high"><?php esc_html_e( 'Unprotected write', 'integrity-sentinel' ); ?></span>
+									<?php else : ?>
+										<span class="is-badge is-badge-low"><?php esc_html_e( 'Unprotected read (informational)', 'integrity-sentinel' ); ?></span>
+									<?php endif; ?>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			<?php endif; ?>
 		</div>
 		<?php
 		$this->render_shell_close();

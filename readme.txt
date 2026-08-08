@@ -4,7 +4,7 @@ Tags: security, malware, hardening, two-factor, firewall
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.24.0
+Stable tag: 1.25.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -189,6 +189,28 @@ miss schedules. Either configure a real system cron to hit
 server's crontab.
 
 == Changelog ==
+
+= 1.25.0 =
+* New: domain-phishing intelligence — generates typosquat variants of
+  this site's own domain and checks whether any are already registered,
+  plus watches Certificate Transparency logs (crt.sh, free and keyless)
+  for a TLS certificate issued on one — an early signal of active
+  phishing infrastructure targeting this site. Opt-in, under Hardening.
+* New: a ransomware / mass-defacement canary — tracks a per-file hash
+  for uploads, themes, and mu-plugins (the parts of a WordPress install
+  core/plugin checksums can't already verify) and flags an abrupt,
+  large-scale change between two scans as a strong signal of ransomware
+  or mass defacement rather than routine editing. On by default.
+* New: a secrets-in-code scanner — detects hardcoded API keys, private
+  keys, and other credential-shaped strings (AWS, GitHub, Slack, Stripe,
+  Google, and a generic credential-named-variable check) in theme and
+  plugin files, alongside the existing malware-heuristic scan.
+* New: a REST API attack-surface audit — flags any registered REST
+  route, from WordPress core or any installed plugin, that accepts a
+  write request with no real permission check. Read-only unprotected
+  routes are shown for visibility on the REST API settings page without
+  becoming a finding, since WordPress core intentionally leaves many
+  read routes public by design.
 
 = 1.24.0 =
 * Improved: the Carousel login template is now a full-bleed, immersive

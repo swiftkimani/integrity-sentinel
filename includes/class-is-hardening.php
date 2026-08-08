@@ -241,7 +241,9 @@ class IS_Hardening {
 			$this->check_plaintext_secrets(),
 			$this->check_dormant_admins(),
 			$this->check_admin_email_domain(),
-			$this->check_tls_certificate()
+			$this->check_tls_certificate(),
+			$this->check_domain_intel(),
+			$this->check_insecure_rest_routes()
 		);
 	}
 
@@ -644,6 +646,92 @@ class IS_Hardening {
 		return array(
 			$this->finding( 'tls_certificate_expiring', $result['severity'], 'https:' . $host, $detail ),
 		);
+	}
+
+	/**
+	 * Flags typosquat domains of the site's own domain that are already
+	 * registered, and typosquat domains with a recently-issued TLS
+	 * certificate (a stronger signal -- active phishing infrastructure,
+	 * not just a parked/reserved lookalike).
+	 */
+	private function check_domain_intel() {
+		$settings = IS_Domain_Intel::settings();
+		if ( empty( $settings['enabled'] ) ) {
+			return array();
+		}
+		$host = IS_Domain_Intel::site_domain();
+		if ( '' === $host ) {
+			return array();
+		}
+
+		$results = ( new IS_Domain_Intel() )->run_checks( $host );
+		$out     = array();
+
+		foreach ( $results['registered'] as $variant ) {
+			$out[] = $this->finding(
+				'typosquat_domain_registered',
+				'medium',
+				'dns:' . $variant,
+				sprintf(
+					/* translators: %s: registered typosquat domain */
+					__( 'A domain resembling this site\'s own domain, "%s", is currently registered. Worth checking whether it\'s a legitimate lookalike (e.g. one you also own) or potential phishing infrastructure.', 'integrity-sentinel' ),
+					$variant
+				)
+			);
+		}
+
+		foreach ( $results['certificates'] as $cert ) {
+			$out[] = $this->finding(
+				'typosquat_domain_cert_issued',
+				'high',
+				'ct:' . $cert['domain'],
+				sprintf(
+					/* translators: 1: lookalike domain, 2: certificate issuer */
+					__( 'A TLS certificate was recently issued for "%1$s" — a domain resembling this site\'s own — by %2$s. A live certificate on a lookalike domain is a strong signal of active phishing infrastructure.', 'integrity-sentinel' ),
+					$cert['domain'],
+					$cert['issuer']
+				)
+			);
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Flags every registered REST route (WordPress core's and every
+	 * installed plugin's, not just this plugin's own) that accepts a
+	 * write method (POST/PUT/PATCH/DELETE) with no real permission
+	 * check. Unprotected read-only routes are intentionally not flagged
+	 * here -- see IS_Rest_API::route_finding_severity()'s doc comment
+	 * for why a naive "flag every __return_true route" would flood a
+	 * vanilla install with noise.
+	 */
+	private function check_insecure_rest_routes() {
+		$settings = IS_Rest_API::settings();
+		$excluded = IS_Rest_API::parse_route_list( $settings['route_audit_exclusions'] );
+		$out      = array();
+
+		foreach ( IS_Rest_API::audit_registered_routes() as $item ) {
+			if ( 'high' !== $item['severity'] ) {
+				continue; // Read-only ('info') routes: visibility on the REST API settings page only, never a finding.
+			}
+			if ( IS_Rest_API::route_excluded_from_audit( $item['route'], $excluded ) ) {
+				continue;
+			}
+			$out[] = $this->finding(
+				'rest_route_write_unprotected',
+				'high',
+				'rest:' . $item['route'],
+				sprintf(
+					/* translators: 1: REST route, 2: comma-separated HTTP methods */
+					__( 'The REST route %1$s accepts %2$s with no permission check — anyone, authenticated or not, can call it. If this is intentional (a known public-write endpoint from another plugin), add its prefix to the route-audit exclusions on the REST API settings page.', 'integrity-sentinel' ),
+					$item['route'],
+					implode( ', ', $item['methods'] )
+				)
+			);
+		}
+
+		return $out;
 	}
 
 	/**

@@ -132,6 +132,12 @@ class IS_Cron {
 
 		$run_id = $scanner->start_run( 'cron' );
 		$this->drive_to_completion( $scanner, $run_id, 500 );
+
+		// Piggybacks on the existing daily cadence rather than a
+		// dedicated cron job -- retention pruning has no reason to run
+		// more often than once a day, and is a no-op unless the admin
+		// has configured a retention window.
+		IS_Audit_Log::maybe_prune();
 	}
 
 	/**

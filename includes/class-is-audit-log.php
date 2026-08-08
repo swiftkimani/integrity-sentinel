@@ -21,6 +21,36 @@ if ( ! defined( 'ABSPATH' ) ) {
 class IS_Audit_Log {
 
 	/**
+	 * Default settings for this module.
+	 */
+	public static function default_settings() {
+		return array( 'retention_days' => 0 ); // 0 = keep forever, matching this plugin's off-by-default posture for anything that changes existing behavior.
+	}
+
+	/**
+	 * Current settings, merged over the defaults.
+	 */
+	public static function settings() {
+		return wp_parse_args( get_option( 'is_audit_log_settings', array() ), self::default_settings() );
+	}
+
+	/**
+	 * Prunes rows older than the configured retention window, if one is
+	 * set. Safe to call unconditionally (e.g. from a cron tick) --
+	 * a no-op when retention_days is 0.
+	 *
+	 * @return int Number of rows deleted.
+	 */
+	public static function maybe_prune() {
+		$days = (int) self::settings()['retention_days'];
+		if ( $days <= 0 ) {
+			return 0;
+		}
+		$cutoff = gmdate( 'Y-m-d H:i:s', time() - ( $days * DAY_IN_SECONDS ) );
+		return self::prune( $cutoff );
+	}
+
+	/**
 	 * Records one audit-log row.
 	 *
 	 * @param string $action Short machine-readable action slug.
@@ -97,11 +127,73 @@ class IS_Audit_Log {
 	}
 
 	/**
+	 * Every audit-log row within a time window, regardless of action --
+	 * used to pull "what else happened around the same time as this
+	 * finding" for an incident bundle export.
+	 *
+	 * @param string $start_mysql Inclusive lower bound.
+	 * @param string $end_mysql   Inclusive upper bound.
+	 * @param int    $limit       Maximum rows to return.
+	 */
+	public static function entries_between( $start_mysql, $end_mysql, $limit = 100 ) {
+		global $wpdb;
+		$table = IS_DB::instance()->audit_table();
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM {$table} WHERE created_at BETWEEN %s AND %s ORDER BY id ASC LIMIT %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$start_mysql,
+				$end_mysql,
+				max( 1, (int) $limit )
+			),
+			ARRAY_A
+		);
+	}
+
+	/**
+	 * Same as count(), matching one exact action slug.
+	 *
+	 * @param string $action_like SQL LIKE pattern (already escaped/prepared -- pass a plain substring; wildcards are added here).
+	 * @param string $since_mysql Only count rows at or after this MySQL datetime.
+	 */
+	public static function count_matching( $action_like, $since_mysql ) {
+		global $wpdb;
+		$table = IS_DB::instance()->audit_table();
+		return (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM {$table} WHERE action LIKE %s AND created_at >= %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				'%' . $wpdb->esc_like( $action_like ) . '%',
+				$since_mysql
+			)
+		);
+	}
+
+	/**
 	 * Total number of audit-log rows.
 	 */
 	public static function count() {
 		global $wpdb;
 		$table = IS_DB::instance()->audit_table();
 		return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	}
+
+	/**
+	 * The one deliberate exception to "append-only": a site-owner-
+	 * configured retention policy (off by default, see
+	 * is_audit_log_settings['retention_days']), not a general delete
+	 * capability -- this only ever bulk-removes rows older than a
+	 * cutoff the admin explicitly chose, never a single row by ID.
+	 *
+	 * @param string $cutoff_mysql Rows with created_at strictly before this MySQL datetime are removed.
+	 * @return int Number of rows deleted.
+	 */
+	public static function prune( $cutoff_mysql ) {
+		global $wpdb;
+		$table = IS_DB::instance()->audit_table();
+		return (int) $wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM {$table} WHERE created_at < %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$cutoff_mysql
+			)
+		);
 	}
 }

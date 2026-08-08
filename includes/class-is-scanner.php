@@ -225,8 +225,9 @@ class IS_Scanner {
 		$core_result        = $this->check_core_integrity( $run_id );
 		$plugin_result      = $this->check_plugin_integrity( $run_id );
 		IS_SBOM::refresh_snapshot();
+		$velocity_findings = $this->check_ransomware_velocity( $run_id, $run['started_at'] );
 
-		$extra_findings = $self_findings + $hardening_findings + $vuln_findings;
+		$extra_findings = $self_findings + $hardening_findings + $vuln_findings + $velocity_findings;
 		if ( ! is_wp_error( $core_result ) ) {
 			$extra_findings += (int) $core_result;
 		}
@@ -263,6 +264,79 @@ class IS_Scanner {
 				? array( 'error' => $plugin_result->get_error_message() )
 				: $plugin_result,
 		);
+	}
+
+	/**
+	 * Evaluates the ransomware/mass-defacement velocity counters
+	 * accumulated across every batch of this run (re-fetched fresh from
+	 * the DB, since the $run array threaded through complete_run() is a
+	 * stale pre-batch-loop snapshot and would under-report), records a
+	 * finding for any scope over threshold, and prunes file-hash rows
+	 * for files that vanished from scope since the last time they were
+	 * seen.
+	 *
+	 * @param int    $run_id     Scan run ID being completed.
+	 * @param string $started_at MySQL datetime this run started (immutable, safe to read from the stale snapshot).
+	 * @return int Number of NEW findings.
+	 */
+	private function check_ransomware_velocity( $run_id, $started_at ) {
+		$settings = IS_Ransomware_Canary::settings();
+		if ( empty( $settings['enabled'] ) ) {
+			return 0;
+		}
+
+		$run    = $this->db->get_run( $run_id );
+		$scopes = array(
+			'uploads'    => array(
+				'changed'   => (int) $run['velocity_uploads_changed'],
+				'total'     => (int) $run['velocity_uploads_total'],
+				'min_files' => $settings['min_files_uploads'],
+				'label'     => __( 'uploads', 'integrity-sentinel' ),
+			),
+			'themes'     => array(
+				'changed'   => (int) $run['velocity_themes_changed'],
+				'total'     => (int) $run['velocity_themes_total'],
+				'min_files' => $settings['min_files_themes'],
+				'label'     => __( 'themes', 'integrity-sentinel' ),
+			),
+			'mu_plugins' => array(
+				'changed'   => (int) $run['velocity_mu_plugins_changed'],
+				'total'     => (int) $run['velocity_mu_plugins_total'],
+				'min_files' => $settings['min_files_mu_plugins'],
+				'label'     => __( 'mu-plugins', 'integrity-sentinel' ),
+			),
+		);
+
+		$new = 0;
+		foreach ( $scopes as $scope => $data ) {
+			$ratio = IS_Ransomware_Canary::changed_ratio( $data['changed'], $data['total'] );
+			if ( ! IS_Ransomware_Canary::is_velocity_alarming( $ratio, $data['total'], $data['min_files'], $settings['threshold_ratio'] ) ) {
+				continue;
+			}
+			$result = $this->db->record_finding(
+				$run_id,
+				array(
+					'file_path'  => 'wp-content/' . $scope,
+					'issue_type' => 'ransomware_velocity',
+					'severity'   => 'critical',
+					'rule_id'    => 'ransomware_velocity_' . $scope,
+					'detail'     => sprintf(
+						/* translators: 1: percentage of files changed, 2: area label (uploads/themes/mu-plugins) */
+						__( '%1$d%% of files in %2$s changed since the last scan — an abrupt, large-scale change like this is consistent with ransomware or mass defacement. Review recent file activity before assuming this is routine.', 'integrity-sentinel' ),
+						round( $ratio * 100 ),
+						$data['label']
+					),
+				)
+			);
+			if ( $result['is_new'] ) {
+				++$new;
+			}
+		}
+
+		$prefixes = array_values( array_filter( IS_Ransomware_Canary::scope_prefixes() ) );
+		$this->db->prune_stale_file_hashes( $prefixes, $started_at );
+
+		return $new;
 	}
 
 	/**
@@ -373,6 +447,18 @@ class IS_Scanner {
 		$size      = filesize( $abs_path );
 		$is_php    = $this->is_php_file( $relative_path );
 
+		// 0. Ransomware/mass-defacement velocity tracking for uploads/
+		// themes/mu-plugins -- the surface with no checksum-based drift
+		// detection at all. See IS_Ransomware_Canary's class doc.
+		$canary_settings = IS_Ransomware_Canary::settings();
+		if ( ! empty( $canary_settings['enabled'] ) ) {
+			$scope = IS_Ransomware_Canary::classify_scope( $relative_path, IS_Ransomware_Canary::scope_prefixes() );
+			if ( null !== $scope ) {
+				$hash_result = $this->db->check_and_update_file_hash( $relative_path, hash_file( 'sha256', $abs_path ) );
+				$this->db->increment_velocity_counters( $run_id, $scope, $hash_result['changed'] );
+			}
+		}
+
 		// 1. PHP file living in uploads/ -- uploads should only ever hold
 		// media, so any executable PHP there is a strong compromise signal
 		// regardless of its content.
@@ -392,47 +478,83 @@ class IS_Scanner {
 			}
 		}
 
-		// 2. Heuristic content scan -- skip if the file is unreasonably
-		// large (pattern matching a multi-megabyte minified vendor bundle
-		// is slow and low-value; we still hash it, just don't grep it).
-		if ( $is_php && $size <= ( (int) $settings['max_file_size_kb'] * 1024 ) ) {
+		// 2. Heuristic content scan (+ secrets scan, #4 below) -- skip if
+		// the file is unreasonably large (pattern matching a multi-
+		// megabyte minified vendor bundle is slow and low-value; we
+		// still hash it, just don't grep it). Widened beyond PHP files
+		// so IS_Secrets can also read config-shaped non-PHP files
+		// (.env, .json, .yml, ...) that could carry a hardcoded secret.
+		$secrets_scannable = IS_Secrets::is_scannable_extension( $relative_path );
+		if ( ( $is_php || $secrets_scannable ) && $size <= ( (int) $settings['max_file_size_kb'] * 1024 ) ) {
 			$content = file_get_contents( $abs_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading a local file for pattern matching, not a remote URL
 			if ( false !== $content ) {
-				foreach ( IS_Heuristics::scan_content( $content ) as $rule_hit ) {
+				if ( $is_php ) {
+					foreach ( IS_Heuristics::scan_content( $content ) as $rule_hit ) {
+						$first  = $rule_hit['matches'][0];
+						$result = $this->db->record_finding(
+							$run_id,
+							array(
+								'file_path'  => $relative_path,
+								'issue_type' => 'heuristic_match',
+								'severity'   => $rule_hit['severity'],
+								'rule_id'    => $rule_hit['rule_id'],
+								'detail'     => $rule_hit['label'],
+								'meta'       => array(
+									'line'    => $first['line'],
+									'snippet' => $first['snippet'],
+									'matches' => $rule_hit['matches'],
+								),
+							)
+						);
+						if ( $result['is_new'] ) {
+							++$new_count;
+						}
+					}
+
+					// 3. Exact-hash signature match against the admin-curated
+					// known-bad-hash list -- reuses the content already read
+					// above rather than hashing the file a second time.
+					foreach ( IS_Signatures::scan_content( $content ) as $rule_hit ) {
+						$result = $this->db->record_finding(
+							$run_id,
+							array(
+								'file_path'  => $relative_path,
+								'issue_type' => 'signature_match',
+								'severity'   => $rule_hit['severity'],
+								'rule_id'    => $rule_hit['rule_id'],
+								'detail'     => $rule_hit['label'],
+								'file_hash'  => hash( 'sha256', $content ),
+							)
+						);
+						if ( $result['is_new'] ) {
+							++$new_count;
+						}
+					}
+				}
+
+				// 4. Hardcoded credentials -- known-vendor-key-format
+				// patterns and a generic credential-named-variable check,
+				// on both PHP and non-PHP scannable files. file_hash is
+				// set (as signature_match does above) so a durably-
+				// Ignored finding correctly expires once the secret is
+				// actually removed from the file -- see
+				// IS_DB::should_reuse_existing_finding().
+				foreach ( IS_Secrets::scan_content( $content ) as $rule_hit ) {
 					$first  = $rule_hit['matches'][0];
 					$result = $this->db->record_finding(
 						$run_id,
 						array(
 							'file_path'  => $relative_path,
-							'issue_type' => 'heuristic_match',
+							'issue_type' => 'secret_exposure',
 							'severity'   => $rule_hit['severity'],
 							'rule_id'    => $rule_hit['rule_id'],
 							'detail'     => $rule_hit['label'],
+							'file_hash'  => hash( 'sha256', $content ),
 							'meta'       => array(
 								'line'    => $first['line'],
 								'snippet' => $first['snippet'],
 								'matches' => $rule_hit['matches'],
 							),
-						)
-					);
-					if ( $result['is_new'] ) {
-						++$new_count;
-					}
-				}
-
-				// 3. Exact-hash signature match against the admin-curated
-				// known-bad-hash list -- reuses the content already read
-				// above rather than hashing the file a second time.
-				foreach ( IS_Signatures::scan_content( $content ) as $rule_hit ) {
-					$result = $this->db->record_finding(
-						$run_id,
-						array(
-							'file_path'  => $relative_path,
-							'issue_type' => 'signature_match',
-							'severity'   => $rule_hit['severity'],
-							'rule_id'    => $rule_hit['rule_id'],
-							'detail'     => $rule_hit['label'],
-							'file_hash'  => hash( 'sha256', $content ),
 						)
 					);
 					if ( $result['is_new'] ) {

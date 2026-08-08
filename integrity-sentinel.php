@@ -18,13 +18,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'IS_VERSION', '1.24.0' );
+define( 'IS_VERSION', '1.25.0' );
 define( 'IS_PLUGIN_FILE', __FILE__ );
 define( 'IS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'IS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'IS_CRON_DAILY_SCAN', 'is_daily_scan_cron' );
 define( 'IS_CRON_RESUME_SCAN', 'is_resume_scan_cron' );
-define( 'IS_DB_VERSION', '4' );
+define( 'IS_DB_VERSION', '5' );
 
 /**
  * Simple class autoloader, same rationale as the directory plugin: this

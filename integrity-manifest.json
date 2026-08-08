@@ -2,7 +2,7 @@
     "assets/css/is-admin.css": "dc98babc9080f08055c0468e7cc6445a01eb045de5c76b9130b77f11df9f307b",
     "assets/js/is-admin.js": "41d816eb9de4ab5373f9227d56ef429f818055a37f330a5d626d6ad5589f7829",
     "assets/js/is-webauthn.js": "0fbe27fefdb3865a69c0680905ab733c81d3950a8ef47f5f073f41db11f0f5cb",
-    "includes/class-is-2fa.php": "4fc22be877b5cf7da7be30d1fbe9ad8fbc9705ef3a5c74b9ffcefb3aba30c02c",
+    "includes/class-is-2fa.php": "e16788ad336749ee791fa0b53ab15f43a08dc11cb9785d5a1ebb0b9a1f8dc8bb",
     "includes/class-is-admin.php": "70b92b55fa7c6856fa88491c8d8ff888f9edb44e4aaf273ce5ced42b3aaa60be",
     "includes/class-is-ajax.php": "82665a71299d7a7ce0fcfe3dc32a409d0df6779ffd59907cb6c57018c9b8f760",
     "includes/class-is-api-key-hygiene.php": "14a16ab3783d04ed4707b40ae5efebb08a8b2937d66b645e213c25cfa3e4397e",
@@ -47,7 +47,7 @@
     "includes/class-is-update-monitor.php": "0f2e9090ac412d825ec47d6c19e85a128d0305c7e48cf63a3e021cec484093dc",
     "includes/class-is-upload-guard.php": "d539ef4bb4c95946cf3ab0438cc2be7a984fbcfd5beb53b131dd4edb90b73add",
     "includes/class-is-vulnerability-scanner.php": "2c848d39ddc50b076351e0513958105ee4f29838ee45f53d182988860f1590ae",
-    "includes/class-is-webauthn.php": "08cf16d175214363f88fe8c9fa7d3f9c631ef7c11f221f8f602a4fc8e7e7a961",
+    "includes/class-is-webauthn.php": "80350782f3d4c56b37fa0fe2c58826e8a8ec7afbab06e9ae30243a7b0c1e2baf",
     "integrity-sentinel.php": "615ce71d3b7748ceb795bb14cc2d5ea082db46040903b1a2d211e45abc837828",
     "uninstall.php": "1f47d97f9f5451dcaf60262b979e1ed94699a8186725eb3ad74006f8f101e9eb"
 }

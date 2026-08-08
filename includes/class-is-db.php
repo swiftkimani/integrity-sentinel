@@ -84,6 +84,14 @@ class IS_DB {
 	}
 
 	/**
+	 * Fully-qualified name of the file-hashes table (used by the ransomware/mass-defacement velocity check).
+	 */
+	public function file_hashes_table() {
+		global $wpdb;
+		return $wpdb->prefix . 'is_file_hashes';
+	}
+
+	/**
 	 * Creates/updates the custom tables when the stored schema version
 	 * doesn't match IS_DB_VERSION.
 	 */
@@ -95,17 +103,18 @@ class IS_DB {
 	}
 
 	/**
-	 * Creates (or updates, via dbDelta) all four custom tables.
+	 * Creates (or updates, via dbDelta) all five custom tables.
 	 */
 	public function create_tables() {
 		global $wpdb;
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
-		$charset_collate  = $wpdb->get_charset_collate();
-		$runs_table       = $this->runs_table();
-		$findings_table   = $this->findings_table();
-		$audit_table      = $this->audit_table();
-		$quarantine_table = $this->quarantine_table();
+		$charset_collate   = $wpdb->get_charset_collate();
+		$runs_table        = $this->runs_table();
+		$findings_table    = $this->findings_table();
+		$audit_table       = $this->audit_table();
+		$quarantine_table  = $this->quarantine_table();
+		$file_hashes_table = $this->file_hashes_table();
 
 		$sql = "CREATE TABLE {$runs_table} (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -120,6 +129,12 @@ class IS_DB {
 			findings_new INT UNSIGNED NOT NULL DEFAULT 0,
 			cursor_data LONGTEXT NULL,
 			error_message TEXT NULL,
+			velocity_uploads_changed INT UNSIGNED NOT NULL DEFAULT 0,
+			velocity_uploads_total INT UNSIGNED NOT NULL DEFAULT 0,
+			velocity_themes_changed INT UNSIGNED NOT NULL DEFAULT 0,
+			velocity_themes_total INT UNSIGNED NOT NULL DEFAULT 0,
+			velocity_mu_plugins_changed INT UNSIGNED NOT NULL DEFAULT 0,
+			velocity_mu_plugins_total INT UNSIGNED NOT NULL DEFAULT 0,
 			PRIMARY KEY  (id),
 			KEY status (status)
 		) {$charset_collate};
@@ -173,6 +188,15 @@ class IS_DB {
 			PRIMARY KEY  (id),
 			KEY status (status),
 			KEY original_path (original_path(191))
+		) {$charset_collate};
+
+		CREATE TABLE {$file_hashes_table} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			file_path VARCHAR(500) NOT NULL,
+			hash VARCHAR(64) NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY  (id),
+			KEY file_path (file_path(191))
 		) {$charset_collate};";
 
 		dbDelta( $sql );
@@ -311,6 +335,43 @@ class IS_DB {
 				$offset,
 				max( 0, (int) $findings_delta ),
 				current_time( 'mysql' ),
+				$run_id
+			)
+		);
+	}
+
+	/**
+	 * Maps a ransomware-canary scope name to its (changed, total) column pair on the runs table.
+	 *
+	 * @var array<string,string[]>
+	 */
+	const VELOCITY_SCOPE_COLUMNS = array(
+		'uploads'    => array( 'velocity_uploads_changed', 'velocity_uploads_total' ),
+		'themes'     => array( 'velocity_themes_changed', 'velocity_themes_total' ),
+		'mu_plugins' => array( 'velocity_mu_plugins_changed', 'velocity_mu_plugins_total' ),
+	);
+
+	/**
+	 * Atomically increments one scope's changed/total file counters for the
+	 * ransomware/mass-defacement velocity check, in SQL (not read-modify-
+	 * write in PHP) for the same reason advance_run() does its findings_new
+	 * increment in SQL -- concurrent batches can't lose each other's counts.
+	 *
+	 * @param int    $run_id        Scan-run id.
+	 * @param string $scope         One of the keys in VELOCITY_SCOPE_COLUMNS.
+	 * @param bool   $file_changed  Whether this file's hash differed from its previously-stored hash.
+	 */
+	public function increment_velocity_counters( $run_id, $scope, $file_changed ) {
+		if ( ! isset( self::VELOCITY_SCOPE_COLUMNS[ $scope ] ) ) {
+			return;
+		}
+		global $wpdb;
+		list( $changed_col, $total_col ) = self::VELOCITY_SCOPE_COLUMNS[ $scope ];
+		$changed_delta                   = $file_changed ? 1 : 0;
+		$wpdb->query(
+			$wpdb->prepare(
+				"UPDATE {$this->runs_table()} SET {$changed_col} = {$changed_col} + %d, {$total_col} = {$total_col} + 1 WHERE id = %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- column names come from the fixed VELOCITY_SCOPE_COLUMNS whitelist above, never user input
+				$changed_delta,
 				$run_id
 			)
 		);
@@ -500,6 +561,97 @@ class IS_DB {
 				$current_run_started_at
 			)
 		);
+	}
+
+	// ---------------------------------------------------------------
+	// File-hash helpers (ransomware/mass-defacement velocity check)
+	// ---------------------------------------------------------------
+
+	/**
+	 * Compares $hash against the stored hash for $file_path (if any),
+	 * then upserts the new hash. Uniqueness of file_path is enforced
+	 * here at the application layer (select-then-upsert), the same way
+	 * record_finding() already handles its own VARCHAR(500) identity
+	 * column -- a prefix-keyed VARCHAR(500) can't be a true unique/
+	 * primary key in InnoDB. Callers already hold the scan batch lock
+	 * (see acquire_scan_lock()) for the duration of a run, so this is
+	 * already effectively serialized -- no additional locking needed.
+	 *
+	 * @param string $file_path Path relative to ABSPATH.
+	 * @param string $hash      Newly-computed hash for the file.
+	 * @return array{is_new:bool,changed:bool}
+	 */
+	public function check_and_update_file_hash( $file_path, $hash ) {
+		global $wpdb;
+		$table = $this->file_hashes_table();
+		$now   = current_time( 'mysql' );
+
+		$existing = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT id, hash FROM {$table} WHERE file_path = %s LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$file_path
+			),
+			ARRAY_A
+		);
+
+		if ( $existing ) {
+			$changed = ( (string) $existing['hash'] !== (string) $hash );
+			$wpdb->update(
+				$table,
+				array(
+					'hash'       => $hash,
+					'updated_at' => $now,
+				),
+				array( 'id' => $existing['id'] ),
+				array( '%s', '%s' ),
+				array( '%d' )
+			);
+			return array(
+				'is_new'  => false,
+				'changed' => $changed,
+			);
+		}
+
+		$wpdb->insert(
+			$table,
+			array(
+				'file_path'  => $file_path,
+				'hash'       => $hash,
+				'updated_at' => $now,
+			),
+			array( '%s', '%s', '%s' )
+		);
+		return array(
+			'is_new'  => true,
+			'changed' => false,
+		);
+	}
+
+	/**
+	 * Removes file-hash rows under any of $scope_prefixes that weren't
+	 * touched by the run that started at $run_started_at -- the file was
+	 * deleted (or moved out of scope) since the last time it was seen.
+	 * Mirrors auto_resolve_stale_findings()'s staleness pattern.
+	 *
+	 * @param string[] $scope_prefixes Relative-path prefixes (e.g. 'wp-content/uploads/') to prune within.
+	 * @param string   $run_started_at MySQL datetime the current run started.
+	 */
+	public function prune_stale_file_hashes( array $scope_prefixes, $run_started_at ) {
+		global $wpdb;
+		$table = $this->file_hashes_table();
+		foreach ( $scope_prefixes as $prefix ) {
+			$prefix = (string) $prefix;
+			if ( '' === $prefix ) {
+				continue;
+			}
+			$wpdb->query(
+				$wpdb->prepare(
+					"DELETE FROM {$table} WHERE file_path LIKE %s AND updated_at < %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$wpdb->esc_like( $prefix ) . '%',
+					$run_started_at
+				)
+			);
+		}
 	}
 
 	/**

@@ -44,6 +44,23 @@ spl_autoload_register(
 );
 
 /**
+ * The one exception to "zero third-party runtime dependencies": FIDO2/
+ * WebAuthn 2FA (IS_WebAuthn) needs web-auth/webauthn-lib, vendored and
+ * committed to the repo (like a normal WP plugin ships its own code, no
+ * build step) rather than fetched at install time. That library's own
+ * floor is PHP 8.2 -- loaded ONLY on 8.2+, so PHP 7.4-8.1 sites are
+ * completely unaffected and never touch this file at all. Composer's
+ * generated platform_check.php guard is intentionally disabled
+ * (`platform-check: false` in composer.json) precisely so this
+ * conditional require -- not Composer's own generated guard -- is what
+ * decides whether the vendored code ever loads.
+ */
+if ( PHP_VERSION_ID >= 80200 && file_exists( IS_PLUGIN_DIR . 'vendor/autoload.php' ) ) {
+	require_once IS_PLUGIN_DIR . 'vendor/autoload.php';
+	define( 'IS_WEBAUTHN_LOADED', true );
+}
+
+/**
  * Boots every module on 'plugins_loaded': loads the text domain, then
  * (main site only, on multisite) instantiates the DB, cron, and every
  * detection/hardening class, plus the admin UI and AJAX handlers when
@@ -72,6 +89,9 @@ function is_init() {
 	IS_Rest_API::instance();
 	IS_Rest_Posts::instance();
 	IS_2FA::instance();
+	if ( IS_WebAuthn::is_available() ) {
+		IS_WebAuthn::instance();
+	}
 	IS_Sessions::instance();
 	IS_Asset_Cloak::instance();
 	IS_Password_Policy::instance();

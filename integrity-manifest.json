@@ -1,7 +1,8 @@
 {
     "assets/css/is-admin.css": "dc98babc9080f08055c0468e7cc6445a01eb045de5c76b9130b77f11df9f307b",
     "assets/js/is-admin.js": "41d816eb9de4ab5373f9227d56ef429f818055a37f330a5d626d6ad5589f7829",
-    "includes/class-is-2fa.php": "05f1d747ed20725fb062be417eb5efde7c3dd0e122b6d18e8ea3d90f7443e1ff",
+    "assets/js/is-webauthn.js": "0fbe27fefdb3865a69c0680905ab733c81d3950a8ef47f5f073f41db11f0f5cb",
+    "includes/class-is-2fa.php": "e16788ad336749ee791fa0b53ab15f43a08dc11cb9785d5a1ebb0b9a1f8dc8bb",
     "includes/class-is-admin.php": "70b92b55fa7c6856fa88491c8d8ff888f9edb44e4aaf273ce5ced42b3aaa60be",
     "includes/class-is-ajax.php": "82665a71299d7a7ce0fcfe3dc32a409d0df6779ffd59907cb6c57018c9b8f760",
     "includes/class-is-api-key-hygiene.php": "14a16ab3783d04ed4707b40ae5efebb08a8b2937d66b645e213c25cfa3e4397e",
@@ -36,7 +37,7 @@
     "includes/class-is-rest-api.php": "8ceb633cf0fc6801dc9ce5ae51de25ceaf4fd78069577229cb8c1d5425072c35",
     "includes/class-is-rest-posts.php": "d7c37f46170cd35a5f65fc43cc0c66f263dadb7116d29e1f1ce8228acb1c5fdb",
     "includes/class-is-sbom.php": "f34fa5cc0abe7730c8e0193124d155b0df1d1ceb1be950db5a7c29e687375584",
-    "includes/class-is-scanner.php": "4ef48acc49d40b11199101eec98791b95daafcc1e50965129eee50c08b89ede7",
+    "includes/class-is-scanner.php": "1cd8d2363223ab5822cf541cf36ab0fed8f296079576f20574e2de0a8ee33f49",
     "includes/class-is-secrets.php": "a3013c1fa5eee45c3b82a41a5955fd9abd710590a3fc37f09a3011ce50db3340",
     "includes/class-is-sessions.php": "5bc94caa97308d5529883e53e81fa91a747f4a54b7a615a23bbe7482908993ab",
     "includes/class-is-signatures.php": "8ac52decc6df0f359616fdaeb289c29fd7f1f312a9889cf7daa9e37f9da72170",
@@ -46,6 +47,7 @@
     "includes/class-is-update-monitor.php": "0f2e9090ac412d825ec47d6c19e85a128d0305c7e48cf63a3e021cec484093dc",
     "includes/class-is-upload-guard.php": "d539ef4bb4c95946cf3ab0438cc2be7a984fbcfd5beb53b131dd4edb90b73add",
     "includes/class-is-vulnerability-scanner.php": "2c848d39ddc50b076351e0513958105ee4f29838ee45f53d182988860f1590ae",
-    "integrity-sentinel.php": "2ce2c250461d92ea7588b86af8fc018b46d777edf2ab59a8fd3e813ecd2053c9",
+    "includes/class-is-webauthn.php": "80350782f3d4c56b37fa0fe2c58826e8a8ec7afbab06e9ae30243a7b0c1e2baf",
+    "integrity-sentinel.php": "615ce71d3b7748ceb795bb14cc2d5ea082db46040903b1a2d211e45abc837828",
     "uninstall.php": "1f47d97f9f5451dcaf60262b979e1ed94699a8186725eb3ad74006f8f101e9eb"
 }

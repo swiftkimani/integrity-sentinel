@@ -39,7 +39,7 @@ jobs:
           coverage: none
           tools: composer
       - name: Install dependencies
-        run: composer update --no-progress --no-interaction
+        run: composer install --no-progress --no-interaction
       - name: Run unit tests
         run: vendor/bin/phpunit -c phpunit.xml.dist
       - name: Verify self-integrity manifest is current
@@ -59,6 +59,6 @@ jobs:
           coverage: none
           tools: composer
       - name: Install dependencies
-        run: composer update --no-progress --no-interaction
+        run: composer install --no-progress --no-interaction
       - name: Run PHPCS
         run: vendor/bin/phpcs

@@ -82,6 +82,44 @@ class IS_Email_Auth {
 		return false;
 	}
 
+	/**
+	 * Pure: is a domain protected by at least one CAA record? Presence
+	 * alone (regardless of which CA it names) means only the listed
+	 * certificate authorities are allowed to issue certificates for this
+	 * domain -- a domain with no CAA record at all can have a cert
+	 * issued by literally any public CA, which is the gap this catches.
+	 *
+	 * @param array<array{tag?:string,value?:string}> $caa_records Raw dns_get_record( $domain, DNS_CAA ) rows.
+	 */
+	public static function has_caa( array $caa_records ) {
+		foreach ( $caa_records as $record ) {
+			$tag = isset( $record['tag'] ) ? strtolower( (string) $record['tag'] ) : '';
+			if ( in_array( $tag, array( 'issue', 'issuewild' ), true ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Pure: the distinct CA domains a CAA record set actually authorizes
+	 * (from `issue`/`issuewild` tags only -- `iodef` is a report-to
+	 * contact, not an authorized issuer).
+	 *
+	 * @param array<array{tag?:string,value?:string}> $caa_records Raw dns_get_record( $domain, DNS_CAA ) rows.
+	 * @return string[]
+	 */
+	public static function caa_issuers( array $caa_records ) {
+		$issuers = array();
+		foreach ( $caa_records as $record ) {
+			$tag = isset( $record['tag'] ) ? strtolower( (string) $record['tag'] ) : '';
+			if ( in_array( $tag, array( 'issue', 'issuewild' ), true ) && ! empty( $record['value'] ) ) {
+				$issuers[] = trim( (string) $record['value'] );
+			}
+		}
+		return array_values( array_unique( $issuers ) );
+	}
+
 	// -----------------------------------------------------------------
 	// WP/PHP-dependent glue
 	// -----------------------------------------------------------------
@@ -109,10 +147,24 @@ class IS_Email_Auth {
 	}
 
 	/**
-	 * Runs the SPF, DMARC, and DKIM presence checks for a domain.
+	 * Looks up CAA records for a hostname.
+	 *
+	 * @param string $hostname Hostname to query.
+	 * @return array<array{tag?:string,value?:string}>
+	 */
+	private static function caa_values_for( $hostname ) {
+		if ( ! defined( 'DNS_CAA' ) ) {
+			return array(); // PHP < 7.0.8 or a build without CAA support -- treated as "unknown", not "missing".
+		}
+		$records = @dns_get_record( $hostname, DNS_CAA ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- a non-existent hostname is an expected outcome, not a code error
+		return is_array( $records ) ? $records : array();
+	}
+
+	/**
+	 * Runs the SPF, DMARC, DKIM, and CAA presence checks for a domain.
 	 *
 	 * @param string $domain Domain to check.
-	 * @return array{domain:string,spf:bool,dmarc:bool,dmarc_policy:string,dkim:bool,dkim_selector:string}
+	 * @return array{domain:string,spf:bool,dmarc:bool,dmarc_policy:string,dkim:bool,dkim_selector:string,caa:bool,caa_issuers:string[]}
 	 */
 	public static function check_domain( $domain ) {
 		$domain = strtolower( trim( (string) $domain ) );
@@ -123,6 +175,8 @@ class IS_Email_Auth {
 			'dmarc_policy'  => '',
 			'dkim'          => false,
 			'dkim_selector' => '',
+			'caa'           => false,
+			'caa_issuers'   => array(),
 		);
 		if ( '' === $domain ) {
 			return $result;
@@ -148,6 +202,10 @@ class IS_Email_Auth {
 				break;
 			}
 		}
+
+		$caa_records           = self::caa_values_for( $domain );
+		$result['caa']         = self::has_caa( $caa_records );
+		$result['caa_issuers'] = self::caa_issuers( $caa_records );
 
 		return $result;
 	}

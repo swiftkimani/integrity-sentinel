@@ -151,4 +151,55 @@ class HardeningTest extends TestCase {
 		);
 		$this->assertSame( array( 'is_vulnerability_scanner_settings', 'is_threat_intel_settings' ), IS_Hardening::options_with_plaintext_secrets( $all ) );
 	}
+
+	// ---- is_dormant --------------------------------------------------------
+
+	const DAY = 86400;
+
+	public function test_no_last_login_data_is_never_dormant() {
+		$this->assertFalse( IS_Hardening::is_dormant( array(), 1000000, 180 ) );
+	}
+
+	public function test_recent_login_is_not_dormant() {
+		$last_login = array( 'time' => 1000000 - ( 10 * self::DAY ) );
+		$this->assertFalse( IS_Hardening::is_dormant( $last_login, 1000000, 180 ) );
+	}
+
+	public function test_old_login_is_dormant() {
+		$last_login = array( 'time' => 1000000 - ( 200 * self::DAY ) );
+		$this->assertTrue( IS_Hardening::is_dormant( $last_login, 1000000, 180 ) );
+	}
+
+	public function test_exactly_at_threshold_is_not_yet_dormant() {
+		$last_login = array( 'time' => 1000000 - ( 180 * self::DAY ) );
+		$this->assertFalse( IS_Hardening::is_dormant( $last_login, 1000000, 180 ) );
+	}
+
+	// ---- admin_email_domain_mismatched -------------------------------------
+
+	public function test_matching_domain_is_not_flagged() {
+		$this->assertFalse( IS_Hardening::admin_email_domain_mismatched( 'admin@example.com', 'example.com' ) );
+	}
+
+	public function test_subdomain_of_site_is_not_flagged() {
+		$this->assertFalse( IS_Hardening::admin_email_domain_mismatched( 'admin@mail.example.com', 'example.com' ) );
+	}
+
+	public function test_unrelated_domain_is_flagged() {
+		$this->assertTrue( IS_Hardening::admin_email_domain_mismatched( 'admin@gmail.com', 'example.com' ) );
+	}
+
+	public function test_lookalike_domain_is_flagged_not_treated_as_subdomain() {
+		// "evil-example.com" ends with "example.com" as a raw string but is
+		// NOT a subdomain of it -- must not false-negative on this.
+		$this->assertTrue( IS_Hardening::admin_email_domain_mismatched( 'admin@evil-example.com', 'example.com' ) );
+	}
+
+	public function test_malformed_email_is_not_flagged() {
+		$this->assertFalse( IS_Hardening::admin_email_domain_mismatched( 'not-an-email', 'example.com' ) );
+	}
+
+	public function test_empty_site_host_is_not_flagged() {
+		$this->assertFalse( IS_Hardening::admin_email_domain_mismatched( 'admin@example.com', '' ) );
+	}
 }

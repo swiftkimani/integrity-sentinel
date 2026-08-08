@@ -53,4 +53,46 @@ class EmailAuthTest extends TestCase {
 	public function test_no_dkim_among_unrelated_records() {
 		$this->assertFalse( IS_Email_Auth::has_dkim( array( 'v=spf1 ~all' ) ) );
 	}
+
+	// ---- has_caa / caa_issuers ----------------------------------------------
+
+	public function test_detects_an_issue_record() {
+		$this->assertTrue( IS_Email_Auth::has_caa( array( array( 'tag' => 'issue', 'value' => 'letsencrypt.org' ) ) ) );
+	}
+
+	public function test_detects_an_issuewild_record() {
+		$this->assertTrue( IS_Email_Auth::has_caa( array( array( 'tag' => 'issuewild', 'value' => 'digicert.com' ) ) ) );
+	}
+
+	public function test_iodef_only_does_not_count_as_caa_protection() {
+		$this->assertFalse( IS_Email_Auth::has_caa( array( array( 'tag' => 'iodef', 'value' => 'mailto:security@example.com' ) ) ) );
+	}
+
+	public function test_no_caa_among_empty_records() {
+		$this->assertFalse( IS_Email_Auth::has_caa( array() ) );
+	}
+
+	public function test_extracts_issuer_domains() {
+		$records = array(
+			array( 'tag' => 'issue', 'value' => 'letsencrypt.org' ),
+			array( 'tag' => 'issuewild', 'value' => 'digicert.com' ),
+		);
+		$this->assertSame( array( 'letsencrypt.org', 'digicert.com' ), IS_Email_Auth::caa_issuers( $records ) );
+	}
+
+	public function test_caa_issuers_excludes_iodef_contacts() {
+		$records = array(
+			array( 'tag' => 'issue', 'value' => 'letsencrypt.org' ),
+			array( 'tag' => 'iodef', 'value' => 'mailto:security@example.com' ),
+		);
+		$this->assertSame( array( 'letsencrypt.org' ), IS_Email_Auth::caa_issuers( $records ) );
+	}
+
+	public function test_caa_issuers_deduplicates() {
+		$records = array(
+			array( 'tag' => 'issue', 'value' => 'letsencrypt.org' ),
+			array( 'tag' => 'issuewild', 'value' => 'letsencrypt.org' ),
+		);
+		$this->assertSame( array( 'letsencrypt.org' ), IS_Email_Auth::caa_issuers( $records ) );
+	}
 }

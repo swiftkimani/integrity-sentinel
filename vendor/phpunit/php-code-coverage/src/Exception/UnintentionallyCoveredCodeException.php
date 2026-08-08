@@ -9,19 +9,15 @@
  */
 namespace SebastianBergmann\CodeCoverage;
 
-use function rtrim;
 use RuntimeException;
 
 final class UnintentionallyCoveredCodeException extends RuntimeException implements Exception
 {
     /**
-     * @var list<string>
+     * @var array
      */
-    private readonly array $unintentionallyCoveredUnits;
+    private $unintentionallyCoveredUnits;
 
-    /**
-     * @param list<string> $unintentionallyCoveredUnits
-     */
     public function __construct(array $unintentionallyCoveredUnits)
     {
         $this->unintentionallyCoveredUnits = $unintentionallyCoveredUnits;
@@ -29,9 +25,6 @@ final class UnintentionallyCoveredCodeException extends RuntimeException impleme
         parent::__construct($this->toString());
     }
 
-    /**
-     * @return list<string>
-     */
     public function getUnintentionallyCoveredUnits(): array
     {
         return $this->unintentionallyCoveredUnits;
@@ -45,6 +38,6 @@ final class UnintentionallyCoveredCodeException extends RuntimeException impleme
             $message .= '- ' . $unit . "\n";
         }
 
-        return rtrim($message);
+        return $message;
     }
 }

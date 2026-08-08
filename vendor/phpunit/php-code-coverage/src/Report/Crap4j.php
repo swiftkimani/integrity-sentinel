@@ -10,19 +10,24 @@
 namespace SebastianBergmann\CodeCoverage\Report;
 
 use function date;
+use function dirname;
+use function file_put_contents;
 use function htmlspecialchars;
 use function is_string;
 use function round;
+use function strpos;
 use DOMDocument;
 use SebastianBergmann\CodeCoverage\CodeCoverage;
 use SebastianBergmann\CodeCoverage\Driver\WriteOperationFailedException;
 use SebastianBergmann\CodeCoverage\Node\File;
 use SebastianBergmann\CodeCoverage\Util\Filesystem;
-use SebastianBergmann\CodeCoverage\Util\Xml;
 
 final class Crap4j
 {
-    private readonly int $threshold;
+    /**
+     * @var int
+     */
+    private $threshold;
 
     public function __construct(int $threshold = 30)
     {
@@ -30,14 +35,12 @@ final class Crap4j
     }
 
     /**
-     * @param null|non-empty-string $target
-     * @param null|non-empty-string $name
-     *
      * @throws WriteOperationFailedException
      */
     public function process(CodeCoverage $coverage, ?string $target = null, ?string $name = null): string
     {
-        $document = new DOMDocument('1.0', 'UTF-8');
+        $document               = new DOMDocument('1.0', 'UTF-8');
+        $document->formatOutput = true;
 
         $root = $document->createElement('crap_result');
         $document->appendChild($root);
@@ -73,7 +76,7 @@ final class Crap4j
                 foreach ($class['methods'] as $methodName => $method) {
                     $crapLoad = $this->crapLoad((float) $method['crap'], $method['ccn'], $method['coverage']);
 
-                    $fullCrap     += $method['crap'];
+                    $fullCrap += $method['crap'];
                     $fullCrapLoad += $crapLoad;
                     $fullMethodCount++;
 
@@ -119,10 +122,16 @@ final class Crap4j
         $root->appendChild($stats);
         $root->appendChild($methodsNode);
 
-        $buffer = Xml::asString($document);
+        $buffer = $document->saveXML();
 
         if ($target !== null) {
-            Filesystem::write($target, $buffer);
+            if (!strpos($target, '://') !== false) {
+                Filesystem::createDirectory(dirname($target));
+            }
+
+            if (@file_put_contents($target, $buffer) === false) {
+                throw new WriteOperationFailedException($target);
+            }
         }
 
         return $buffer;

@@ -14,23 +14,21 @@ use function count;
 use RecursiveIterator;
 
 /**
- * @template-implements RecursiveIterator<non-negative-int, Test>
- *
- * @no-named-arguments Parameter names are not covered by the backward compatibility promise for PHPUnit
+ * @template-implements RecursiveIterator<int, Test>
  *
  * @internal This class is not covered by the backward compatibility promise for PHPUnit
  */
 final class TestSuiteIterator implements RecursiveIterator
 {
     /**
-     * @var list<Test>
+     * @var int
      */
-    private readonly array $tests;
+    private $position = 0;
 
     /**
-     * @var non-negative-int
+     * @var Test[]
      */
-    private int $position = 0;
+    private $tests;
 
     public function __construct(TestSuite $testSuite)
     {
@@ -47,9 +45,6 @@ final class TestSuiteIterator implements RecursiveIterator
         return $this->position < count($this->tests);
     }
 
-    /**
-     * @return non-negative-int
-     */
     public function key(): int
     {
         return $this->position;
